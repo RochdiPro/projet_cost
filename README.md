@@ -19,7 +19,9 @@ Les indicateurs de délais, les montants restants des factures, les coûts des c
 
 ## Development server
 
-Run `ng serve` for a dev server. Navigate to `http://localhost:4200/`. The application will automatically reload if you change any of the source files.
+Run `npm start` to launch Angular and the local API together. Navigate to `http://localhost:4201/`. The application will automatically reload if you change any of the source files.
+
+The API saves generated workbooks in `src/assets` through `http://localhost:3000`. Set `ANGULAR_PORT=4200` if that port is available.
 
 ## Code scaffolding
 

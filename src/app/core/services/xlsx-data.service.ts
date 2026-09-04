@@ -11,7 +11,9 @@ import {
   AutreFacture,
   Restauration,
   Deplacement,
-  ChargeSociete
+  ChargeSociete,
+  Paiement,
+  PhaseProjet
 } from '../models/project-cost.models';
 
 @Injectable({ providedIn: 'root' })
@@ -19,6 +21,14 @@ export class XlsxDataService {
   private readonly tables = new Map<string, object[]>();
 
   constructor(private readonly http: HttpClient) {}
+
+  async listAssetFiles(): Promise<string[]> {
+    return firstValueFrom(this.http.get<string[]>('http://localhost:3000/api/projects/files'));
+  }
+
+  async deleteAssetFile(fileName: string): Promise<void> {
+    await firstValueFrom(this.http.delete(`http://localhost:3000/api/projects/file?fileName=${encodeURIComponent(fileName)}`));
+  }
 
   async importAsset<T>(assetPath: string, sheetName?: string): Promise<T[]> {
     const response = await firstValueFrom(this.http.get(assetPath, { responseType: 'arraybuffer' }));
@@ -52,6 +62,11 @@ export class XlsxDataService {
     return this.readProjectWorkbook(workbook);
   }
 
+  async importProjectWorkbookFromAsset(assetPath: string): Promise<ProjectWorkbook> {
+    const response = await firstValueFrom(this.http.get(assetPath, { responseType: 'arraybuffer' }));
+    return this.readProjectWorkbook(XLSX.read(response, { type: 'array' }));
+  }
+
   exportProjectWorkbook(fileName: string, data: ProjectWorkbook): void {
     const workbook = XLSX.utils.book_new();
     const sheets: Array<[string, object[]]> = [
@@ -61,6 +76,8 @@ export class XlsxDataService {
       [PROJECT_WORKBOOK_SHEETS.restauration, data.restauration],
       [PROJECT_WORKBOOK_SHEETS.logistique, data.logistique],
       [PROJECT_WORKBOOK_SHEETS.charges, data.charges],
+      [PROJECT_WORKBOOK_SHEETS.paiements, data.paiements],
+      [PROJECT_WORKBOOK_SHEETS.planification, data.planification],
       [PROJECT_WORKBOOK_SHEETS.rapport, data.rapport]
     ];
 
@@ -69,6 +86,32 @@ export class XlsxDataService {
     }
 
     XLSX.writeFile(workbook, fileName);
+  }
+
+  async saveProjectWorkbookToAssets(fileName: string, data: ProjectWorkbook): Promise<void> {
+    const workbook = XLSX.utils.book_new();
+    const sheets: Array<[string, object[]]> = [
+      [PROJECT_WORKBOOK_SHEETS.infoProjet, data.infoProjet],
+      [PROJECT_WORKBOOK_SHEETS.factures, data.factures],
+      [PROJECT_WORKBOOK_SHEETS.autresFactures, data.autresFactures],
+      [PROJECT_WORKBOOK_SHEETS.restauration, data.restauration],
+      [PROJECT_WORKBOOK_SHEETS.logistique, data.logistique],
+      [PROJECT_WORKBOOK_SHEETS.charges, data.charges],
+      [PROJECT_WORKBOOK_SHEETS.paiements, data.paiements],
+      [PROJECT_WORKBOOK_SHEETS.planification, data.planification],
+      [PROJECT_WORKBOOK_SHEETS.rapport, data.rapport]
+    ];
+
+    for (const [sheetName, rows] of sheets) {
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), sheetName);
+    }
+
+    const content = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    await firstValueFrom(
+      this.http.post(`http://localhost:3000/api/projects/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
+        headers: { 'Content-Type': 'application/octet-stream' }
+      })
+    );
   }
 
   calculateProjectReport(data: Omit<ProjectWorkbook, 'rapport'>): ProjetRapport[] {
@@ -141,6 +184,8 @@ export class XlsxDataService {
       restauration: read<Restauration>(PROJECT_WORKBOOK_SHEETS.restauration),
       logistique: read<Deplacement>(PROJECT_WORKBOOK_SHEETS.logistique),
       charges: read<ChargeSociete>(PROJECT_WORKBOOK_SHEETS.charges),
+      paiements: read<Paiement>(PROJECT_WORKBOOK_SHEETS.paiements),
+      planification: read<PhaseProjet>(PROJECT_WORKBOOK_SHEETS.planification),
       rapport: read<ProjetRapport>(PROJECT_WORKBOOK_SHEETS.rapport)
     };
   }

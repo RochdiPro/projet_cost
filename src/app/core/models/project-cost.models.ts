@@ -7,6 +7,8 @@ export const PROJECT_WORKBOOK_SHEETS = {
   restauration: 'RESTAURATION',
   logistique: 'LOGISTIQUE',
   charges: 'CHARGES',
+  paiements: 'PAIEMENTS',
+  planification: 'PLANIFICATION',
   rapport: 'RAPPORT'
 } as const;
 
@@ -94,6 +96,23 @@ export interface ProjetRapport {
   montant: number;
 }
 
+export interface Paiement {
+  id: string;
+  montant: number;
+  fournisseur: string;
+  date: string;
+  etat: 'PAYE' | 'PLANIFIE';
+}
+
+export interface PhaseProjet {
+  phase: string;
+  dateDebut: string;
+  dateFin: string;
+  nombreJours: number;
+  avanceRetard: number;
+  etat: ProjectStatus;
+}
+
 export interface ProjectWorkbook {
   infoProjet: Projet[];
   factures: Facture[];
@@ -101,5 +120,7 @@ export interface ProjectWorkbook {
   restauration: Restauration[];
   logistique: Deplacement[];
   charges: ChargeSociete[];
+  paiements: Paiement[];
+  planification: PhaseProjet[];
   rapport: ProjetRapport[];
 }
