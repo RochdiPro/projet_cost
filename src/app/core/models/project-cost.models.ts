@@ -1,4 +1,4 @@
-export type ProjectStatus = 'A_VENIR' | 'EN_COURS' | 'A_SURVEILLER' | 'EN_RETARD' | 'TERMINE';
+export type ProjectStatus = 'A_VENIR' | 'EN_COURS' | 'EN_AVANCE' | 'A_SURVEILLER' | 'EN_RETARD' | 'TERMINE';
 
 export const PROJECT_WORKBOOK_SHEETS = {
   infoProjet: 'INFO_PROJET',
@@ -9,6 +9,7 @@ export const PROJECT_WORKBOOK_SHEETS = {
   charges: 'CHARGES',
   paiements: 'PAIEMENTS',
   planification: 'PLANIFICATION',
+  sousTraitance: 'SOUS_TRAITANCE',
   rapport: 'RAPPORT'
 } as const;
 
@@ -38,12 +39,10 @@ export interface Fournisseur {
 export interface Facture {
   id: string;
   fournisseur: string;
+  description: string;
   numeroFacture: string;
   numeroBC: string;
   montantTotal: number;
-  montantPaye: number;
-  montantRestant?: number;
-  dateEcheance: string;
 }
 
 export interface PaiementPlanifie {
@@ -101,16 +100,25 @@ export interface Paiement {
   montant: number;
   fournisseur: string;
   date: string;
-  etat: 'PAYE' | 'PLANIFIE';
+  etat: 'PAYE' | 'NON_PAYE';
 }
 
 export interface PhaseProjet {
   phase: string;
   dateDebut: string;
   dateFin: string;
+  dateFinReelle?: string;
   nombreJours: number;
+  pourcentageRealisation: number;
   avanceRetard: number;
   etat: ProjectStatus;
+}
+
+export interface SousTraitance {
+  collaborateur: string;
+  contact: string;
+  description: string;
+  montant: number;
 }
 
 export interface ProjectWorkbook {
@@ -122,5 +130,6 @@ export interface ProjectWorkbook {
   charges: ChargeSociete[];
   paiements: Paiement[];
   planification: PhaseProjet[];
+  sousTraitance: SousTraitance[];
   rapport: ProjetRapport[];
 }

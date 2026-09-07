@@ -13,7 +13,8 @@ import {
   Deplacement,
   ChargeSociete,
   Paiement,
-  PhaseProjet
+  PhaseProjet,
+  SousTraitance
 } from '../models/project-cost.models';
 
 @Injectable({ providedIn: 'root' })
@@ -78,6 +79,7 @@ export class XlsxDataService {
       [PROJECT_WORKBOOK_SHEETS.charges, data.charges],
       [PROJECT_WORKBOOK_SHEETS.paiements, data.paiements],
       [PROJECT_WORKBOOK_SHEETS.planification, data.planification],
+      [PROJECT_WORKBOOK_SHEETS.sousTraitance, data.sousTraitance],
       [PROJECT_WORKBOOK_SHEETS.rapport, data.rapport]
     ];
 
@@ -99,6 +101,7 @@ export class XlsxDataService {
       [PROJECT_WORKBOOK_SHEETS.charges, data.charges],
       [PROJECT_WORKBOOK_SHEETS.paiements, data.paiements],
       [PROJECT_WORKBOOK_SHEETS.planification, data.planification],
+      [PROJECT_WORKBOOK_SHEETS.sousTraitance, data.sousTraitance],
       [PROJECT_WORKBOOK_SHEETS.rapport, data.rapport]
     ];
 
@@ -121,6 +124,7 @@ export class XlsxDataService {
     const autresFactures = total(data.autresFactures);
     const restauration = total(data.restauration);
     const logistique = total(data.logistique);
+    const sousTraitance = total(data.sousTraitance);
     const charges = data.charges.reduce(
       (sum, charge) => sum + Number(charge.montantTotal ?? charge.nombreJoursTravail * charge.montantJour),
       0
@@ -131,8 +135,9 @@ export class XlsxDataService {
       { categorie: 'Autres factures', montant: autresFactures },
       { categorie: 'Restauration', montant: restauration },
       { categorie: 'Logistique', montant: logistique },
+      { categorie: 'Sous-traitance', montant: sousTraitance },
       { categorie: 'Charges société', montant: charges },
-      { categorie: 'Coût total', montant: factures + autresFactures + restauration + logistique + charges }
+      { categorie: 'Coût total', montant: factures + autresFactures + restauration + logistique + sousTraitance + charges }
     ];
   }
 
@@ -162,7 +167,7 @@ export class XlsxDataService {
   }
 
   calculateInvoiceRemaining(invoice: Facture): number {
-    return Math.max(0, Number(invoice.montantTotal) - Number(invoice.montantPaye));
+    return Math.max(0, Number(invoice.montantTotal));
   }
 
   calculateChargeTotal(charge: ChargeSociete): number {
@@ -186,6 +191,7 @@ export class XlsxDataService {
       charges: read<ChargeSociete>(PROJECT_WORKBOOK_SHEETS.charges),
       paiements: read<Paiement>(PROJECT_WORKBOOK_SHEETS.paiements),
       planification: read<PhaseProjet>(PROJECT_WORKBOOK_SHEETS.planification),
+      sousTraitance: read<SousTraitance>(PROJECT_WORKBOOK_SHEETS.sousTraitance),
       rapport: read<ProjetRapport>(PROJECT_WORKBOOK_SHEETS.rapport)
     };
   }

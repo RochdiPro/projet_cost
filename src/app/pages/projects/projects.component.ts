@@ -14,9 +14,11 @@ import {
   ChargeSociete,
   Paiement,
   PhaseProjet,
+  SousTraitance,
   ProjetRapport
 } from '../../core/models/project-cost.models';
 import { AuthService } from '../../core/services/auth.service';
+import { XlsxDataService } from '../../core/services/xlsx-data.service';
 
 type SheetKey = keyof ProjectWorkbook;
 type Row = Record<string, string | number | boolean | null>;
@@ -24,7 +26,15 @@ type Row = Record<string, string | number | boolean | null>;
 interface ProjectFile {
   name: string;
   data: ProjectWorkbook;
+  fromAssets?: boolean;
 }
+
+const sanitizeFileNamePart = (value: unknown): string => String(value ?? '')
+  .trim()
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-zA-Z0-9]+/g, '_')
+  .replace(/^_+|_+$/g, '');
 
 const createDemoWorkbook = (): ProjectWorkbook => ({
   infoProjet: [
@@ -48,10 +58,8 @@ const createDemoWorkbook = (): ProjectWorkbook => ({
       fournisseur: 'additive',
       numeroFacture: 'F-001',
       numeroBC: 'BC-001',
+      description: 'Prestation principale',
       montantTotal: 12000,
-      montantPaye: 6000,
-      montantRestant: 6000,
-      dateEcheance: '2026-09-20'
     }
   ] as Facture[],
   autresFactures: [
@@ -94,10 +102,13 @@ const createDemoWorkbook = (): ProjectWorkbook => ({
     { id: 'PAY-001', montant: 6000, fournisseur: 'additive', date: '2026-09-03', etat: 'PAYE' }
   ] as Paiement[],
   planification: [
-    { phase: 'Préparation', dateDebut: '2026-09-01', dateFin: '2026-09-05', nombreJours: 5, avanceRetard: 0, etat: 'TERMINE' },
-    { phase: 'Réalisation', dateDebut: '2026-09-06', dateFin: '2026-09-25', nombreJours: 20, avanceRetard: 0, etat: 'EN_COURS' },
-    { phase: 'Clôture', dateDebut: '2026-09-26', dateFin: '2026-09-30', nombreJours: 5, avanceRetard: 0, etat: 'A_VENIR' }
+    { phase: 'Préparation', dateDebut: '2026-09-01', dateFin: '2026-09-05', dateFinReelle: '2026-09-05', nombreJours: 5, pourcentageRealisation: 100, avanceRetard: 0, etat: 'TERMINE' },
+    { phase: 'Réalisation', dateDebut: '2026-09-06', dateFin: '2026-09-25', nombreJours: 20, pourcentageRealisation: 0, avanceRetard: 0, etat: 'EN_COURS' },
+    { phase: 'Clôture', dateDebut: '2026-09-26', dateFin: '2026-09-30', nombreJours: 5, pourcentageRealisation: 0, avanceRetard: 0, etat: 'A_VENIR' }
   ] as PhaseProjet[],
+  sousTraitance: [
+    { collaborateur: 'Atelier Delta', contact: '+33 6 00 00 00 00', description: 'Installation technique', montant: 2800 }
+  ] as SousTraitance[],
   rapport: [
     { categorie: 'Factures avec BC', montant: 12000 },
     { categorie: 'Autres factures', montant: 2450 },
@@ -119,6 +130,8 @@ Chart.register(...registerables);
         <a routerLink="/dashboard" class="logo"><b>PC</b> PROJECT COST</a>
         <nav>
           <a routerLink="/dashboard">Tableau de bord</a>
+          <a routerLink="/suppliers">Fournisseurs</a>
+          <a routerLink="/products">Produits</a>
           <button type="button" (click)="logout()">Quitter</button>
         </nav>
       </header>
@@ -130,10 +143,13 @@ Chart.register(...registerables);
           <p>Ouvrez un fichier Excel pour consulter et modifier ses feuilles.</p>
         </div>
 
-        <label class="import">
-          ＋ Importer un fichier
-          <input type="file" accept=".xlsx,.xls" (change)="importFile($event)" />
-        </label>
+        <div class="hero-actions">
+          <label class="import">
+            ＋ Importer un fichier
+            <input type="file" accept=".xlsx,.xls" (change)="importFile($event)" />
+          </label>
+          <button type="button" class="new-project" (click)="addProject()">＋ Ajouter projet</button>
+        </div>
       </section>
 
       <section class="content">
@@ -143,18 +159,19 @@ Chart.register(...registerables);
 
         <div class="cards">
           @for (file of files; track file.name) {
-            <button
-              type="button"
+            <article
               class="card"
               [class.selected]="selectedFile?.name === file.name"
-              (click)="selectFile(file)"
             >
               <span class="icon">▦</span>
               <small>XLSX · PROJET</small>
               <strong>{{ title(file) }}</strong>
               <em>{{ file.name }}</em>
-              <label>Ouvrir <b>→</b></label>
-            </button>
+              <div class="card-actions">
+                <button type="button" class="open-file" (click)="selectFile(file)">Ouvrir <b>→</b></button>
+                <button type="button" class="download-file" title="Télécharger le fichier" (click)="downloadFile(file)">Télécharger</button>
+              </div>
+            </article>
           } @empty {
             <div class="empty">
               <span>□</span>
@@ -188,8 +205,57 @@ Chart.register(...registerables);
               }
             </div>
 
+            <section class="global-summary" aria-label="Résumé global du projet">
+              <div class="global-summary-title"><small>Résumé global</small><strong>Coût total du projet</strong><b>{{ formatAmount(globalSummary.total) }}</b></div>
+              <div><small>Factures avec BC</small><strong>{{ formatAmount(globalSummary.factures) }}</strong></div>
+              <div><small>Autres factures</small><strong>{{ formatAmount(globalSummary.autresFactures) }}</strong></div>
+              <div><small>Restauration</small><strong>{{ formatAmount(globalSummary.restauration) }}</strong></div>
+              <div><small>Logistique</small><strong>{{ formatAmount(globalSummary.logistique) }}</strong></div>
+              <div><small>Charge service interne</small><strong>{{ formatAmount(globalSummary.charges) }}</strong></div>
+              <div><small>Sous-traitance</small><strong>{{ formatAmount(globalSummary.sousTraitance) }}</strong></div>
+            </section>
+
+            @if (activeSheet !== 'infoProjet' && activeSheet !== 'planification') {
+              <section class="sheet-summary" aria-label="Résumé de la feuille active">
+                <div><small>Éléments</small><strong>{{ sheetSummary.count }}</strong></div>
+                <div><small>Coût total</small><strong>{{ formatAmount(sheetSummary.total) }}</strong></div>
+              </section>
+            }
+
+            @if (hasFilter('fournisseur') || hasFilter('etat')) {
+              <div class="filters" aria-label="Filtres de la feuille">
+                @if (hasFilter('fournisseur')) {
+                  <label>Fournisseur
+                    <select [(ngModel)]="supplierFilter" (ngModelChange)="refreshPlanningChart()">
+                      <option value="">Tous les fournisseurs</option>
+                      @for (supplier of suppliers; track supplier) { <option [value]="supplier">{{ supplier }}</option> }
+                    </select>
+                  </label>
+                }
+                @if (hasFilter('etat')) {
+                  <label>État
+                    <select [(ngModel)]="stateFilter" (ngModelChange)="refreshPlanningChart()">
+                      <option value="">Tous les états</option>
+                      @for (state of states; track state.value) { <option [value]="state.value">{{ state.label }}</option> }
+                    </select>
+                  </label>
+                }
+              </div>
+            }
+
+            @if (activeSheet === 'rapport') {
+              <section class="report-summary">
+                <div><small>Factures avec BC</small><strong>{{ formatAmount(reportSummary.factures) }}</strong></div>
+                <div><small>Autres factures</small><strong>{{ formatAmount(reportSummary.autresFactures) }}</strong></div>
+                <div><small>Sous-traitance</small><strong>{{ formatAmount(reportSummary.sousTraitance) }}</strong></div>
+                <div><small>Paiements payés</small><strong>{{ formatAmount(reportSummary.paye) }}</strong></div>
+                <div><small>Paiements non payés</small><strong>{{ formatAmount(reportSummary.nonPaye) }}</strong></div>
+                <div><small>État du projet</small><strong>{{ reportSummary.etatProjet }}</strong></div>
+              </section>
+            }
+
             <div class="table-box">
-              @if (rows.length) {
+              @if (filteredRows.length) {
                 <table>
                   <thead>
                     <tr>
@@ -200,7 +266,7 @@ Chart.register(...registerables);
                     </tr>
                   </thead>
                   <tbody>
-                    @for (row of rows; track $index) {
+                    @for (row of filteredRows; track $index) {
                       <tr>
                         @for (header of headers; track header) {
                           <td>{{ cellValue(header, row[header]) }}</td>
@@ -231,6 +297,8 @@ Chart.register(...registerables);
                   <div><span>Écart moyen</span><strong>{{ planningStats.variance }} j</strong></div>
                 </div>
                 <div class="chart-frame"><canvas #planningChart></canvas></div>
+                <div class="chart-frame timeline-frame"><canvas #timelineChart></canvas></div>
+                <div class="chart-frame timeline-frame"><canvas #costChart></canvas></div>
               </section>
             }
           </section>
@@ -261,7 +329,7 @@ Chart.register(...registerables);
                     <label class="field">
                       {{ fieldLabel(header) }}
                       @if (isStatus(header)) {
-                        <select [(ngModel)]="draftRow[header]">
+                        <select [(ngModel)]="draftRow[header]" (ngModelChange)="onFieldChange(header)" [disabled]="isCalculatedField(header)">
                           @for (status of statusOptions; track status.value) {
                             <option [value]="status.value">{{ status.label }}</option>
                           }
@@ -269,10 +337,13 @@ Chart.register(...registerables);
                       } @else {
                         <input
                           [(ngModel)]="draftRow[header]"
+                          (ngModelChange)="onFieldChange(header)"
                           [type]="fieldType(header)"
                           [attr.inputmode]="fieldInputMode(header)"
                           [attr.step]="fieldStep(header)"
-                          [readonly]="isIdentifier(header)"
+                          [attr.min]="isRealization(header) ? 0 : null"
+                          [attr.max]="isRealization(header) ? 100 : null"
+                          [readonly]="isIdentifier(header) || isCalculatedField(header) || isChargeCalculated(header)"
                           [placeholder]="fieldPlaceholder(header)"
                         />
                       }
@@ -313,6 +384,9 @@ Chart.register(...registerables);
       .hero p { color: #dbeafe; }
       .import { position: relative; padding: 14px 16px; border: 1px solid #93c5fd; color: #fff; font: 12px monospace; cursor: pointer; white-space: nowrap; }
       .import input { display: none; }
+      .hero-actions { display: flex; align-items: center; gap: 12px; }
+      .new-project { padding: 14px 16px; border: 1px solid #bfdbfe; background: #2563eb; color: #fff; font: 700 12px monospace; cursor: pointer; white-space: nowrap; }
+      .new-project:hover { background: #1d4ed8; }
       .content { padding: 38px 10% 80px; }
       .message { padding: 13px; border-left: 3px solid #2563eb; background: #dbeafe; color: #1e40af; font-size: 13px; }
       .cards { display: grid; grid-template-columns: repeat(auto-fill,minmax(220px,1fr)); gap: 16px; }
@@ -322,7 +396,11 @@ Chart.register(...registerables);
       .card small { color: #94a3b8; font: 10px monospace; }
       .card strong { margin-top: 9px; font: 700 20px Georgia,serif; }
       .card em { overflow: hidden; margin-top: 6px; color: #64748b; font-style: normal; }
-      .card label { margin-top: auto; color: #2563eb; font: 700 12px monospace; }
+      .card-actions { display: flex; align-items: center; gap: 14px; margin-top: auto; }
+      .open-file, .download-file { border: 0; background: none; padding: 0; cursor: pointer; font: 700 12px monospace; }
+      .open-file { color: #2563eb; }
+      .download-file { color: #64748b; }
+      .download-file:hover { color: #1e3a5f; text-decoration: underline; }
       .empty { padding: 26px; border: 1px dashed #cbd5e1; background: #fff; color: #475569; text-align: center; }
       .viewer { margin-top: 28px; border: 1px solid #dfe7f4; background: #fff; }
       .viewer-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 22px; border-bottom: 1px solid #e2e8f0; }
@@ -336,6 +414,24 @@ Chart.register(...registerables);
       .tabs { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 16px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
       .tabs button { padding: 8px 12px; border: 1px solid #dbeafe; background: #fff; color: #334155; font: 11px monospace; cursor: pointer; }
       .tabs .active { background: #dbeafe; border-color: #93c5fd; }
+      .global-summary { display: grid; grid-template-columns: 1.35fr repeat(3, 1fr); gap: 10px; padding: 16px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+      .global-summary div { padding: 12px; border: 1px solid #dbeafe; background: #fff; }
+      .global-summary small { display: block; color: #64748b; font: 10px sans-serif; text-transform: uppercase; }
+      .global-summary strong { display: block; margin-top: 6px; color: #1e3a5f; font: 700 16px sans-serif; }
+      .global-summary-title { grid-row: span 2; background: #1e3a5f !important; border-color: #1e3a5f !important; }
+      .global-summary-title small, .global-summary-title strong { color: #dbeafe; }
+      .global-summary-title b { display: block; margin-top: 18px; color: #fff; font: 400 25px sans-serif; }
+      .sheet-summary { display: flex; gap: 12px; padding: 14px 16px; background: #fff; border-bottom: 1px solid #e2e8f0; }
+      .sheet-summary div { min-width: 150px; padding: 11px 14px; border: 1px solid #e2e8f0; background: #f8fafc; }
+      .sheet-summary small { display: block; color: #64748b; font: 10px sans-serif; text-transform: uppercase; }
+      .sheet-summary strong { display: block; margin-top: 5px; color: #1e3a5f; font: 700 21px sans-serif; }
+      .report-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 16px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+      .report-summary div { padding: 12px; border: 1px solid #dbeafe; background: #fff; }
+      .report-summary small { display: block; color: #64748b; font: 10px sans-serif; text-transform: uppercase; }
+      .report-summary strong { display: block; margin-top: 6px; color: #1e3a5f; font: 700 17px sans-serif; }
+      .filters { display: flex; flex-wrap: wrap; gap: 12px; padding: 14px 16px; border-bottom: 1px solid #e2e8f0; background: #fff; }
+      .filters label { display: grid; gap: 5px; color: #64748b; font: 11px sans-serif; }
+      .filters select { min-width: 190px; padding: 8px 10px; border: 1px solid #cbd5e1; background: #fff; color: #334155; }
       .table-box { overflow-x: auto; }
       table { width: 100%; border-collapse: collapse; }
       th, td { padding: 12px 10px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }
@@ -354,6 +450,7 @@ Chart.register(...registerables);
       .planning-stats span { display: block; color: #64748b; font: 10px monospace; text-transform: uppercase; }
       .planning-stats strong { display: block; margin-top: 7px; color: #1e3a5f; font: 700 24px Georgia, serif; }
       .chart-frame { position: relative; height: 280px; padding: 14px 8px 4px; border: 1px solid #e2e8f0; background: #fff; }
+      .timeline-frame { margin-top: 16px; }
       .modal-backdrop { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(15,23,42,.35); padding: 24px; }
       .modal { width: min(520px,90vw); background: #fff; border: 1px solid #e2e8f0; padding: 22px; box-shadow: 0 18px 36px rgba(15,23,42,.18); }
       .modal h2 { margin: 0 0 12px; font: 700 30px Georgia,serif; }
@@ -368,19 +465,28 @@ Chart.register(...registerables);
       .danger { border-color: #fecaca; background: #fee2e2; color: #991b1b; }
       .save-text { border-color: #bbf7d0; background: #dcfce7; color: #166534; }
       @media (max-width: 820px) { .hero { flex-direction: column; align-items: flex-start; } .topbar { padding: 0 20px; } nav { gap: 12px; } }
-      @media (max-width: 560px) { .fields-grid, .planning-stats { grid-template-columns: 1fr; } .insights-head { align-items: flex-start; flex-direction: column; } }
+      @media (max-width: 560px) { .hero-actions { width: 100%; flex-wrap: wrap; } }
+      @media (max-width: 820px) { .global-summary { grid-template-columns: repeat(2, 1fr); } .global-summary-title { grid-row: auto; } }
+      @media (max-width: 560px) { .fields-grid, .planning-stats, .global-summary { grid-template-columns: 1fr; } .insights-head { align-items: flex-start; flex-direction: column; } }
     `
   ]
 })
 export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
   private readonly xlsx = XLSX;
   private readonly auth = inject(AuthService);
+  private readonly xlsxData = inject(XlsxDataService);
   @ViewChild('planningChart') private planningCanvas?: ElementRef<HTMLCanvasElement>;
+  @ViewChild('timelineChart') private timelineCanvas?: ElementRef<HTMLCanvasElement>;
+  @ViewChild('costChart') private costCanvas?: ElementRef<HTMLCanvasElement>;
   private planningChart?: Chart;
+  private timelineChart?: Chart;
+  private costChart?: Chart;
 
   files: ProjectFile[] = [];
   selectedFile?: ProjectFile;
   activeSheet: SheetKey = 'infoProjet';
+  supplierFilter = '';
+  stateFilter = '';
   message = '';
   modalMode: '' | 'row' | 'delete-row' | 'file' = '';
   editingRow?: Row;
@@ -392,10 +498,10 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     { key: 'autresFactures', label: 'AUTRES_FACTURES', icon: '¤' },
     { key: 'restauration', label: 'RESTAURATION', icon: '◇' },
     { key: 'logistique', label: 'LOGISTIQUE', icon: '↗' },
-    { key: 'charges', label: 'CHARGES', icon: '♙' },
+    { key: 'charges', label: 'CHARGE SERVICE INTERNE', icon: '♙' },
     { key: 'paiements', label: 'PAIEMENTS', icon: '€' },
     { key: 'planification', label: 'PLANIFICATION', icon: '◷' },
-    { key: 'rapport', label: 'RAPPORT', icon: '▤' }
+    { key: 'sousTraitance', label: 'SOUS-TRAITANCE', icon: '◇' },
   ];
 
   get rows(): Row[] {
@@ -404,11 +510,87 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   get headers(): string[] {
-    return this.rows.length ? Object.keys(this.rows[0]) : [];
+    return this.rows.length ? Object.keys(this.rows[0]).filter((header) => !this.isHiddenInvoiceField(header) && !this.isIdentifier(header)) : [];
+  }
+
+  get filteredRows(): Row[] {
+    return this.rows.filter((row) => {
+      const supplierMatches = !this.supplierFilter || String(row['fournisseur'] ?? '') === this.supplierFilter;
+      const stateMatches = !this.stateFilter || String(row['etat'] ?? '') === this.stateFilter;
+      return supplierMatches && stateMatches;
+    });
+  }
+
+  get suppliers(): string[] {
+    return [...new Set(this.rows.map((row) => String(row['fournisseur'] ?? '').trim()).filter(Boolean))].sort();
+  }
+
+  get states(): Array<{ value: string; label: string }> {
+    const available = new Set(this.rows.map((row) => String(row['etat'] ?? '')));
+    return this.statusOptions.filter((state) => available.has(state.value));
+  }
+
+  hasFilter(field: 'fournisseur' | 'etat'): boolean {
+    return this.rows.some((row) => row[field] !== undefined);
+  }
+
+  refreshPlanningChart(): void {
+    if (this.activeSheet === 'planification') setTimeout(() => this.renderPlanningChart());
+  }
+
+  get sheetSummary(): { count: number; total: number } {
+    const total = this.filteredRows.reduce((sum, row) => {
+      const amountKeys = ['montant', 'montantTotal'];
+      return sum + amountKeys.reduce((rowTotal, key) => rowTotal + (Number(String(row[key] ?? 0).replace(',', '.')) || 0), 0);
+    }, 0);
+
+    return { count: this.filteredRows.length, total };
+  }
+
+  get globalSummary(): { factures: number; autresFactures: number; restauration: number; logistique: number; charges: number; sousTraitance: number; total: number } {
+    const data = this.selectedFile?.data;
+    const sum = (rows: Array<{ montant?: number; montantTotal?: number }>): number =>
+      rows.reduce((total, row) => total + Number(row.montant ?? row.montantTotal ?? 0), 0);
+    const factures = sum(data?.factures ?? []);
+    const autresFactures = sum(data?.autresFactures ?? []);
+    const restauration = sum(data?.restauration ?? []);
+    const logistique = sum(data?.logistique ?? []);
+    const charges = sum(data?.charges ?? []);
+    const sousTraitance = sum(data?.sousTraitance ?? []);
+
+    return { factures, autresFactures, restauration, logistique, charges, sousTraitance, total: factures + autresFactures + restauration + logistique + charges + sousTraitance };
+  }
+
+  get reportSummary(): { factures: number; autresFactures: number; restauration: number; logistique: number; charges: number; sousTraitance: number; paye: number; nonPaye: number; etatProjet: string } {
+    const data = this.selectedFile?.data;
+    const sum = (rows: Array<{ montant?: number; montantTotal?: number }>): number =>
+      rows.reduce((total, row) => total + Number(row.montant ?? row.montantTotal ?? 0), 0);
+    const projectState = data?.infoProjet[0]?.etat;
+    const stateLabels: Record<string, string> = {
+      A_VENIR: 'Planifié', EN_COURS: 'En cours', EN_AVANCE: 'En avance', A_SURVEILLER: 'À surveiller', EN_RETARD: 'En retard', TERMINE: 'Clôturé'
+    };
+
+    return {
+      factures: sum(data?.factures ?? []),
+      autresFactures: sum(data?.autresFactures ?? []),
+      restauration: sum(data?.restauration ?? []),
+      logistique: sum(data?.logistique ?? []),
+      charges: sum(data?.charges ?? []),
+      sousTraitance: sum(data?.sousTraitance ?? []),
+      paye: (data?.paiements ?? []).filter((payment) => payment.etat === 'PAYE').reduce((total, payment) => total + Number(payment.montant || 0), 0),
+      nonPaye: (data?.paiements ?? []).filter((payment) => payment.etat === 'NON_PAYE').reduce((total, payment) => total + Number(payment.montant || 0), 0),
+      etatProjet: stateLabels[projectState ?? ''] ?? 'Non renseigné'
+    };
+  }
+
+  formatAmount(value: number): string {
+    return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'TND', minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(value || 0);
   }
 
   get modalHeaders(): string[] {
-    return this.headers.length ? this.headers : this.defaultHeaders[this.activeSheet];
+    const headers = this.headers.length ? this.headers : this.defaultHeaders[this.activeSheet];
+    const requiredHeaders = this.activeSheet === 'planification' || this.activeSheet === 'factures' || this.activeSheet === 'paiements' ? this.defaultHeaders[this.activeSheet] : [];
+    return [...new Set([...headers, ...requiredHeaders])].filter((header) => !this.isHiddenInvoiceField(header) && !this.isIdentifier(header));
   }
 
   get modalTitle(): string {
@@ -419,9 +601,10 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
       autresFactures: 'une autre facture',
       restauration: 'une dépense de restauration',
       logistique: 'une dépense logistique',
-      charges: 'une charge',
+      charges: 'une charge service interne',
       paiements: 'un paiement',
       planification: 'une phase projet',
+      sousTraitance: 'une prestation de sous-traitance',
       rapport: 'une ligne de rapport'
     };
 
@@ -432,11 +615,13 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.activeSheet === 'paiements'
       ? [
           { value: 'PAYE', label: 'Payé' },
-          { value: 'PLANIFIE', label: 'Planifié' }
+          { value: 'NON_PAYE', label: 'Non payé' }
         ]
       : [
           { value: 'A_VENIR', label: 'Planifié' },
           { value: 'EN_COURS', label: 'En cours' },
+          { value: 'EN_AVANCE', label: 'En avance' },
+          { value: 'A_SURVEILLER', label: 'À surveiller' },
           { value: 'EN_RETARD', label: 'En retard' },
           { value: 'TERMINE', label: 'Clôturé' }
         ];
@@ -448,20 +633,22 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
       client: 'Client',
       montant: 'Montant',
       montantTotal: 'Montant total',
-      montantPaye: 'Montant payé',
       montantRestant: 'Montant restant',
       montantJour: 'Montant par jour',
       fournisseur: 'Fournisseur',
+      collaborateur: 'Collaborateur',
+      contact: 'Contact',
       etat: 'État',
       phase: 'Phase',
       nombreJours: 'Nombre de jours',
       avanceRetard: 'Avance / retard (jours)',
+      pourcentageRealisation: 'Réalisation (%)',
       dateDebut: 'Date de début',
       dateFin: 'Date de fin',
+      dateFinReelle: 'Date de fin réelle',
       dateDebutPrevue: 'Date de début prévue',
       dateDebutReelle: 'Date de début réelle',
       dateFinPrevue: 'Date de fin prévue',
-      dateFinReelle: 'Date de fin réelle',
       dateEcheance: "Date d'échéance",
       nombreJoursTravail: 'Nombre de jours travaillés',
       categorie: 'Catégorie'
@@ -472,7 +659,7 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
 
   fieldType(header: string): 'date' | 'number' | 'text' {
     if (header.toLowerCase().includes('date')) return 'date';
-    if (header.toLowerCase().includes('jours') || header.toLowerCase().includes('avance') || header.toLowerCase().includes('retard')) return 'number';
+    if (header.toLowerCase().includes('jours') || header.toLowerCase().includes('avance') || header.toLowerCase().includes('retard') || header.toLowerCase().includes('pourcentage')) return 'number';
     return 'text';
   }
 
@@ -480,6 +667,10 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     if (this.isStatus(header)) {
       const status = this.statusOptions.find((option) => option.value === value);
       return status?.label ?? value;
+    }
+
+    if (header === 'pourcentageRealisation' && typeof value === 'number') {
+      return `${value}%`;
     }
 
     if (header === 'avanceRetard' && typeof value === 'number') {
@@ -502,15 +693,63 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   isIdentifier(header: string): boolean {
-    return header.toLowerCase() === 'id' || header.toLowerCase().includes('id projet');
+    const normalizedHeader = header.toLowerCase().replace(/[\s_-]/g, '');
+    return normalizedHeader === 'id' || normalizedHeader.startsWith('idprojet');
   }
 
   isStatus(header: string): boolean {
     return header.toLowerCase() === 'etat' || header.toLowerCase().includes('état');
   }
 
+  isPlanningCalculated(header: string): boolean {
+    return this.activeSheet === 'planification' && ['nombrejours', 'avanceretard'].includes(header.toLowerCase().replace(/[\s_-]/g, ''));
+  }
+
+  isProjectTimingCalculated(header: string): boolean {
+    return this.activeSheet === 'infoProjet' && ['jourspasses', 'joursrestants', 'joursretard', 'etat'].includes(header.toLowerCase().replace(/[\s_-]/g, ''));
+  }
+
+  isCalculatedField(header: string): boolean {
+    return this.isPlanningCalculated(header) || this.isProjectTimingCalculated(header);
+  }
+
+  isRealization(header: string): boolean {
+    return header.toLowerCase().replace(/[\s_-]/g, '') === 'pourcentagerealisation';
+  }
+
+  isChargeCalculated(header: string): boolean {
+    return this.activeSheet === 'charges' && header === 'montantTotal';
+  }
+
+  refreshPlanningDraft(): void {
+    if (this.activeSheet === 'planification') {
+      this.calculatePlanningRow(this.draftRow);
+    }
+  }
+
+  refreshProjectDraft(): void {
+    if (this.activeSheet === 'infoProjet') {
+      this.calculateProjectRow(this.draftRow);
+    }
+  }
+
+  onFieldChange(header: string): void {
+    if (header !== 'etat') {
+      this.refreshProjectDraft();
+      this.refreshPlanningDraft();
+      if (this.activeSheet === 'charges') {
+        this.calculateChargeDraft();
+      }
+    }
+  }
+
   private isAmount(header: string): boolean {
     return header.toLowerCase().includes('montant');
+  }
+
+  private isHiddenInvoiceField(header: string): boolean {
+    const normalizedHeader = header.toLowerCase().replace(/[\s_-]/g, '');
+    return this.activeSheet === 'factures' && ['montantpaye', 'montantrestant', 'dateecheance'].includes(normalizedHeader);
   }
 
   private normalizeRow(row: Row): Row {
@@ -523,30 +762,159 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
       }
     }
 
+    if (this.activeSheet === 'factures') {
+      delete normalized['montantPaye'];
+      delete normalized['montantRestant'];
+      delete normalized['dateEcheance'];
+      normalized['description'] ??= '';
+    }
+
+    if (this.activeSheet === 'paiements') {
+      if (normalized['montant'] === undefined) {
+        normalized['montant'] = Number(normalized['montantPaye'] ?? 0) + Number(normalized['montantPlanifie'] ?? 0);
+      }
+      delete normalized['montantPaye'];
+      delete normalized['montantPlanifie'];
+      normalized['montant'] ??= 0;
+      normalized['etat'] = normalized['etat'] === 'PAYE' ? 'PAYE' : 'NON_PAYE';
+    }
+
+    if (this.activeSheet === 'planification') {
+      this.calculatePlanningRow(normalized);
+    }
+
+    if (this.activeSheet === 'infoProjet') {
+      this.calculateProjectRow(normalized);
+    }
+
+    if (this.activeSheet === 'charges') {
+      this.calculateChargeDraft(normalized);
+    }
+
     return normalized;
+  }
+
+  private calculateChargeDraft(row: Row = this.draftRow): void {
+    const days = Number(row['nombreJoursTravail'] || 0);
+    const dailyAmount = Number(String(row['montantJour'] ?? 0).replace(',', '.')) || 0;
+    row['montantTotal'] = Math.max(0, days) * Math.max(0, dailyAmount);
+  }
+
+  private calculateProjectRow(row: Row): void {
+    Object.assign(row, this.xlsxData.calculateProjectTiming(row as unknown as Projet));
+  }
+
+  private hasDuplicateEmployee(rows: Row[], candidate: Row): boolean {
+    const employee = String(candidate['employe'] ?? '').trim().toLocaleLowerCase();
+    if (!employee) return false;
+
+    return rows.some((row) => row !== this.editingRow && String(row['employe'] ?? '').trim().toLocaleLowerCase() === employee);
+  }
+
+  private calculatePlanningRow(row: Row): void {
+    const start = this.parsePlanningDate(row['dateDebut']);
+    const plannedEnd = this.parsePlanningDate(row['dateFin']);
+    const actualEnd = this.parsePlanningDate(row['dateFinReelle']);
+
+    if (!start || !plannedEnd) {
+      row['nombreJours'] = '';
+      row['pourcentageRealisation'] = this.clampRealization(row['pourcentageRealisation']) ?? '';
+      row['avanceRetard'] = '';
+      row['etat'] = '';
+      return;
+    }
+
+    row['nombreJours'] = Math.max(0, this.daysBetween(start, plannedEnd) + 1);
+
+    if (actualEnd) {
+      const elapsedDays = this.daysBetween(start, actualEnd) + 1;
+      row['dateFinReelle'] = this.formatPlanningDate(actualEnd);
+      const variance = this.daysBetween(actualEnd, plannedEnd);
+      row['pourcentageRealisation'] = 100;
+      row['avanceRetard'] = variance;
+      row['etat'] = variance > 0 ? 'EN_AVANCE' : variance < 0 ? 'EN_RETARD' : 'TERMINE';
+      return;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const enteredRealization = this.clampRealization(row['pourcentageRealisation']);
+    const elapsedDays = this.daysBetween(start, today) + 1;
+    row['pourcentageRealisation'] = enteredRealization ?? (today < start
+      ? 0
+      : Math.min(99, Math.max(0, Math.round((elapsedDays / (Number(row['nombreJours']) || 1)) * 100))));
+    if (today < start) {
+      row['avanceRetard'] = 0;
+      if (!row['etat']) row['etat'] = 'A_VENIR';
+    } else if (today > plannedEnd) {
+      row['avanceRetard'] = -this.daysBetween(plannedEnd, today);
+      if (!row['etat']) row['etat'] = 'EN_RETARD';
+    } else {
+      row['avanceRetard'] = 0;
+      if (!row['etat']) row['etat'] = 'EN_COURS';
+    }
+  }
+
+  private parsePlanningDate(value: Row[string]): Date | undefined {
+    if (typeof value !== 'string' || !value) return undefined;
+    const date = new Date(`${value}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }
+
+  private formatPlanningDate(date: Date): string {
+    return date.toISOString().slice(0, 10);
+  }
+
+  private daysBetween(from: Date, to: Date): number {
+    return Math.round((to.getTime() - from.getTime()) / 86400000);
+  }
+
+  private clampRealization(value: Row[string]): number | undefined {
+    if (value === null || value === '' || typeof value === 'boolean') return undefined;
+    const percentage = Number(value);
+    return Number.isFinite(percentage) ? Math.min(100, Math.max(0, percentage)) : undefined;
   }
 
   private readonly defaultHeaders: Record<SheetKey, string[]> = {
     infoProjet: ['id', 'client', 'description', 'dateDebutPrevue', 'dateDebutReelle', 'dateFinPrevue', 'dateFinReelle', 'joursPasses', 'joursRestants', 'joursRetard', 'etat'],
-    factures: ['id', 'fournisseur', 'numeroFacture', 'numeroBC', 'montantTotal', 'montantPaye', 'montantRestant', 'dateEcheance'],
+    factures: ['id', 'fournisseur', 'description', 'numeroFacture', 'numeroBC', 'montantTotal'],
     autresFactures: ['id', 'fournisseur', 'description', 'montant', 'date'],
     restauration: ['id', 'date', 'montant', 'description'],
     logistique: ['id', 'type', 'date', 'montant', 'description'],
     charges: ['id', 'employe', 'nombreJoursTravail', 'montantJour', 'montantTotal', 'description'],
-    paiements: ['id', 'montant', 'fournisseur', 'date', 'etat'],
-    planification: ['phase', 'dateDebut', 'dateFin', 'nombreJours', 'avanceRetard', 'etat'],
+    paiements: ['id', 'fournisseur', 'date', 'etat', 'montant'],
+    planification: ['phase', 'dateDebut', 'dateFin', 'dateFinReelle', 'nombreJours', 'pourcentageRealisation', 'avanceRetard', 'etat'],
+    sousTraitance: ['collaborateur', 'contact', 'description', 'montant'],
     rapport: ['categorie', 'montant']
   };
 
-  ngOnInit(): void {
+  async ngOnInit(): Promise<void> {
     const defaultFile: ProjectFile = {
       name: 'Projet_additive_delice.xlsx',
-      data: createDemoWorkbook()
+      data: this.withCalculatedProjectTiming(createDemoWorkbook())
     };
 
-    this.files = [defaultFile];
-    this.selectedFile = defaultFile;
-    this.message = 'Fichier de démonstration chargé.';
+    try {
+      const names = await this.xlsxData.listAssetFiles();
+      this.files = await Promise.all(
+        names.map(async (name) => ({
+          name,
+          data: this.withCalculatedProjectTiming(await this.xlsxData.importProjectWorkbookFromAsset(`assets/${name}`)),
+          fromAssets: true
+        }))
+      );
+    } catch {
+      this.files = [];
+    }
+
+    if (!this.files.length) {
+      this.files = [defaultFile];
+      this.message = 'Fichier de démonstration chargé. Enregistrez-le pour le créer dans src/assets.';
+    } else {
+      this.message = `${this.files.length} fichier(s) Excel chargé(s) depuis src/assets.`;
+    }
+
+    this.selectedFile = this.files[0];
   }
 
   title(file: ProjectFile): string {
@@ -554,20 +922,59 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     return project?.client || file.name.replace(/\.xlsx?$/i, '');
   }
 
+  projectFileName(file: ProjectFile): string {
+    const project = file.data.infoProjet[0];
+    const client = sanitizeFileNamePart(project?.client);
+    const projectName = sanitizeFileNamePart(project?.description);
+    const parts = ['Projet', client, projectName].filter(Boolean);
+
+    return parts.length > 1 ? `${parts.join('_')}.xlsx` : file.name;
+  }
+
   selectFile(file: ProjectFile): void {
     this.selectedFile = file;
     this.activeSheet = 'infoProjet';
   }
 
+  addProject(): void {
+    const projectFile: ProjectFile = {
+      name: `Projet_${Date.now()}.xlsx`,
+      data: {
+        infoProjet: [],
+        factures: [],
+        autresFactures: [],
+        restauration: [],
+        logistique: [],
+        charges: [],
+        paiements: [],
+        planification: [],
+        sousTraitance: [],
+        rapport: []
+      }
+    };
+
+    this.files = [...this.files, projectFile];
+    this.selectedFile = projectFile;
+    this.activeSheet = 'infoProjet';
+    this.editingRow = undefined;
+    this.draftRow = {};
+    for (const header of this.modalHeaders) this.draftRow[header] = '';
+    this.refreshProjectDraft();
+    this.modalMode = 'row';
+    this.message = 'Complétez les informations du nouveau projet, puis enregistrez le fichier.';
+  }
+
   selectSheet(sheet: SheetKey): void {
     this.activeSheet = sheet;
+    this.supplierFilter = '';
+    this.stateFilter = '';
     if (sheet === 'planification') setTimeout(() => this.renderPlanningChart());
   }
 
   addRow(): void {
     const row: Row = {};
     for (const header of this.modalHeaders) {
-      row[header] = header === 'id' ? `PRJ-${Date.now()}` : '';
+      row[header] = '';
     }
 
     this.editingRow = undefined;
@@ -578,6 +985,11 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
   editRow(row: Row): void {
     this.editingRow = row;
     this.draftRow = { ...row };
+    this.refreshProjectDraft();
+    this.refreshPlanningDraft();
+    if (this.activeSheet === 'charges') {
+      this.calculateChargeDraft();
+    }
     this.modalMode = 'row';
   }
 
@@ -588,6 +1000,11 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
 
     const currentRows = this.selectedFile.data[this.activeSheet] as unknown as Row[];
     const normalizedRow = this.normalizeRow(this.draftRow);
+
+    if (this.activeSheet === 'charges' && this.hasDuplicateEmployee(currentRows, normalizedRow)) {
+      this.message = 'Cet employé existe déjà dans les charges service interne.';
+      return;
+    }
 
     if (this.editingRow) {
       const index = currentRows.indexOf(this.editingRow);
@@ -600,6 +1017,7 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.closeModal();
     this.message = `Ligne enregistrée dans ${this.activeSheet}.`;
+    this.refreshNewProjectFileName();
     if (this.activeSheet === 'planification') setTimeout(() => this.renderPlanningChart());
   }
 
@@ -630,15 +1048,23 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     this.modalMode = 'file';
   }
 
-  deleteFile(): void {
+  async deleteFile(): Promise<void> {
     if (!this.selectedFile) {
       return;
     }
 
-    this.files = this.files.filter((file) => file.name !== this.selectedFile?.name);
-    this.selectedFile = this.files[0];
-    this.closeModal();
-    this.message = `${this.selectedFile ? this.selectedFile.name : 'Fichier'} supprimé.`;
+    const fileName = this.selectedFile.name;
+    try {
+      if (this.selectedFile.fromAssets) {
+        await this.xlsxData.deleteAssetFile(fileName);
+      }
+      this.files = this.files.filter((file) => file.name !== fileName);
+      this.selectedFile = this.files[0];
+      this.closeModal();
+      this.message = `${fileName} supprimé de src/assets.`;
+    } catch {
+      this.message = `Impossible de supprimer ${fileName} de src/assets.`;
+    }
   }
 
   importFile(event: Event): void {
@@ -673,27 +1099,57 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     reader.readAsArrayBuffer(file);
   }
 
-  saveFile(): void {
+  async saveFile(): Promise<void> {
     if (!this.selectedFile) {
       return;
     }
 
+    const previousFileName = this.selectedFile.name;
+    const fileName = this.projectFileName(this.selectedFile);
+
+    try {
+      this.withCalculatedProjectTiming(this.selectedFile.data);
+      await this.xlsxData.saveProjectWorkbookToAssets(fileName, this.selectedFile.data);
+      if (this.selectedFile.fromAssets && previousFileName !== fileName) {
+        await this.xlsxData.deleteAssetFile(previousFileName);
+      }
+      this.selectedFile.name = fileName;
+      this.selectedFile.fromAssets = true;
+      this.message = `${fileName} enregistré dans src/assets.`;
+    } catch {
+      this.message = `Impossible d'enregistrer ${fileName} dans src/assets.`;
+    }
+  }
+
+  downloadFile(file: ProjectFile): void {
+    const fileName = this.projectFileName(file);
     const workbook = this.xlsx.utils.book_new();
     const sheetNames = Object.keys(PROJECT_WORKBOOK_SHEETS) as Array<keyof typeof PROJECT_WORKBOOK_SHEETS>;
 
     for (const key of sheetNames) {
       const sheetName = PROJECT_WORKBOOK_SHEETS[key];
-      const rows = this.selectedFile.data[key] ?? [];
+      const rows = file.data[key] ?? [];
       this.xlsx.utils.book_append_sheet(workbook, this.xlsx.utils.json_to_sheet(rows), sheetName);
     }
 
-    this.xlsx.writeFile(workbook, this.selectedFile.name);
-    this.message = `${this.selectedFile.name} a été exporté.`;
+    this.xlsx.writeFile(workbook, fileName);
+    this.message = `${fileName} téléchargé.`;
+  }
+
+  private refreshNewProjectFileName(): void {
+    if (!this.selectedFile || this.selectedFile.fromAssets || this.activeSheet !== 'infoProjet') {
+      return;
+    }
+
+    this.selectedFile.name = this.projectFileName(this.selectedFile);
   }
 
   get planningStats(): { total: number; completed: number; progress: number; variance: number } {
-    const phases = this.selectedFile?.data.planification ?? [];
+    const phases = this.filteredRows as unknown as PhaseProjet[];
     const completed = phases.filter((phase) => phase.etat === 'TERMINE').length;
+    const progress = phases.length
+      ? Math.round(phases.reduce((sum, phase) => sum + this.planningPercentage(phase), 0) / phases.length)
+      : 0;
     const variance = phases.length
       ? Math.round(phases.reduce((sum, phase) => sum + Number(phase.avanceRetard || 0), 0) / phases.length)
       : 0;
@@ -701,7 +1157,7 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     return {
       total: phases.length,
       completed,
-      progress: phases.length ? Math.round((completed / phases.length) * 100) : 0,
+      progress,
       variance
     };
   }
@@ -712,13 +1168,15 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.planningChart?.destroy();
+    this.timelineChart?.destroy();
+    this.costChart?.destroy();
   }
 
   private renderPlanningChart(): void {
     if (!this.planningCanvas || this.activeSheet !== 'planification') return;
 
     this.planningChart?.destroy();
-    const phases = this.selectedFile?.data.planification ?? [];
+    const phases = this.filteredRows as unknown as PhaseProjet[];
     this.planningChart = new Chart(this.planningCanvas.nativeElement, {
       type: 'line',
       data: {
@@ -743,6 +1201,16 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
             pointRadius: 5,
             tension: 0.35,
             fill: true
+          },
+          {
+            label: 'Réalisation %',
+            data: phases.map((phase) => Number(phase.pourcentageRealisation || 0)),
+            borderColor: '#16a34a',
+            backgroundColor: '#16a34a22',
+            pointBackgroundColor: '#16a34a',
+            pointRadius: 5,
+            tension: 0.35,
+            fill: false
           }
         ]
       },
@@ -753,6 +1221,75 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
         scales: { y: { beginAtZero: true, grid: { color: '#e5e7eb' } }, x: { grid: { display: false } } }
       }
     });
+    this.renderTimelineChart();
+    this.renderCostChart();
+  }
+
+  private renderTimelineChart(): void {
+    if (!this.timelineCanvas || this.activeSheet !== 'planification') return;
+
+    this.timelineChart?.destroy();
+    const phases = this.selectedFile?.data.planification ?? [];
+    this.timelineChart = new Chart(this.timelineCanvas.nativeElement, {
+      type: 'line',
+      data: {
+        labels: phases.map((phase) => `${phase.dateDebut} - ${phase.phase}`),
+        datasets: [{
+          label: 'Réalisation (%)',
+          data: phases.map((phase) => this.planningPercentage(phase)),
+          borderColor: '#16a34a',
+          backgroundColor: '#16a34a22',
+          pointBackgroundColor: '#16a34a',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          pointRadius: 7,
+          tension: 0.25,
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          title: { display: true, text: 'Chronologie des phases et réalisation' },
+          tooltip: { callbacks: { title: (items) => phases[items[0]?.dataIndex ?? 0]?.phase ?? '' } },
+          legend: { display: false }
+        },
+        scales: { y: { min: 0, max: 100, ticks: { callback: (value) => `${value}%` } }, x: { title: { display: true, text: 'Date de début' }, grid: { display: false } } }
+      }
+    });
+  }
+
+  private renderCostChart(): void {
+    if (!this.costCanvas || this.activeSheet !== 'planification') return;
+
+    this.costChart?.destroy();
+    const summary = this.globalSummary;
+    this.costChart = new Chart(this.costCanvas.nativeElement, {
+      type: 'bar',
+      data: {
+        labels: ['Factures avec BC', 'Autres factures', 'Restauration', 'Logistique', 'Charge interne', 'Sous-traitance'],
+        datasets: [{
+          label: 'Coût (TND)',
+          data: [summary.factures, summary.autresFactures, summary.restauration, summary.logistique, summary.charges, summary.sousTraitance],
+          backgroundColor: ['#2563eb', '#60a5fa', '#f59e0b', '#8b5cf6', '#16a34a', '#e56b4f'],
+          borderRadius: 4
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { title: { display: true, text: 'Répartition des coûts par onglet' }, legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { callback: (value) => `${value} TND` } }, x: { grid: { display: false } } }
+      }
+    });
+  }
+
+  private planningPercentage(phase: PhaseProjet): number {
+    if (Number.isFinite(Number(phase.pourcentageRealisation))) return Number(phase.pourcentageRealisation);
+    if (phase.etat === 'TERMINE' || phase.etat === 'EN_AVANCE') return 100;
+    if (phase.etat === 'EN_COURS') return 50;
+    return 0;
   }
 
   private createPlanningChartImage(): string {
@@ -768,7 +1305,8 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
         labels: phases.map((phase) => phase.phase),
         datasets: [
           { label: 'Durée prévue', data: phases.map((phase) => phase.nombreJours), borderColor: '#2563eb', backgroundColor: '#2563eb22', pointRadius: 5, tension: .35, fill: true },
-          { label: 'Avance / retard', data: phases.map((phase) => phase.avanceRetard), borderColor: '#e56b4f', backgroundColor: '#e56b4f22', pointRadius: 5, tension: .35, fill: true }
+          { label: 'Avance / retard', data: phases.map((phase) => phase.avanceRetard), borderColor: '#e56b4f', backgroundColor: '#e56b4f22', pointRadius: 5, tension: .35, fill: true },
+          { label: 'Réalisation %', data: phases.map((phase) => this.planningPercentage(phase)), borderColor: '#16a34a', backgroundColor: '#16a34a22', pointRadius: 5, tension: .35, fill: false }
         ]
       },
       options: { animation: false, responsive: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
@@ -778,17 +1316,97 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     return image;
   }
 
+  private createTimelineChartImage(): string {
+    const phases = this.selectedFile?.data.planification ?? [];
+    if (!phases.length) return '';
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 1200;
+    canvas.height = 420;
+    const chart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: phases.map((phase) => `${phase.dateDebut} - ${phase.phase}`),
+        datasets: [{
+          label: 'Réalisation (%)',
+          data: phases.map((phase) => phase.pourcentageRealisation),
+          borderColor: '#16a34a',
+          backgroundColor: '#16a34a22',
+          pointRadius: 7,
+          tension: .25,
+          fill: true
+        }]
+      },
+      options: { animation: false, responsive: false, plugins: { title: { display: true, text: 'Chronologie des phases et réalisation' }, legend: { display: false } }, scales: { y: { min: 0, max: 100, ticks: { callback: (value) => `${value}%` } } } }
+    });
+    const image = chart.toBase64Image();
+    chart.destroy();
+    return image;
+  }
+
+  private createCostChartImage(): string {
+    const summary = this.globalSummary;
+    const canvas = document.createElement('canvas');
+    canvas.width = 1200;
+    canvas.height = 420;
+    const chart = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: ['Factures avec BC', 'Autres factures', 'Restauration', 'Logistique', 'Charge interne', 'Sous-traitance'],
+        datasets: [{
+          label: 'Coût (TND)',
+          data: [summary.factures, summary.autresFactures, summary.restauration, summary.logistique, summary.charges, summary.sousTraitance],
+          backgroundColor: ['#2563eb', '#60a5fa', '#f59e0b', '#8b5cf6', '#16a34a', '#e56b4f'],
+          borderRadius: 4
+        }]
+      },
+      options: { animation: false, responsive: false, plugins: { legend: { display: false }, title: { display: true, text: 'Répartition des coûts du projet' } }, scales: { y: { beginAtZero: true } } }
+    });
+    const image = chart.toBase64Image();
+    chart.destroy();
+    return image;
+  }
+
+  private reportTable(title: string, rows: Row[], columns: string[]): string {
+    const visibleColumns = columns.filter((column) => !this.isIdentifier(column));
+    const header = visibleColumns.map((column) => `<th>${this.fieldLabel(column)}</th>`).join('');
+    const body = rows.map((row) => `<tr>${visibleColumns.map((column) => `<td>${this.reportValue(column, row[column])}</td>`).join('')}</tr>`).join('');
+    return `<section class="section"><h2>${title}</h2><table><thead><tr>${header}</tr></thead><tbody>${body || `<tr><td colspan="${visibleColumns.length}">Aucune donnée</td></tr>`}</tbody></table></section>`;
+  }
+
+  private reportValue(column: string, value: Row[string]): string {
+    if (this.isStatus(column)) return String(this.cellValue(column, value) ?? '');
+    if (this.isAmount(column)) return this.formatAmount(Number(String(value ?? 0).replace(',', '.')) || 0);
+    if (column === 'pourcentageRealisation') return `${value ?? 0}%`;
+    return String(value ?? '');
+  }
+
   printReport(): void {
     if (!this.selectedFile) return;
 
     const project = this.selectedFile.data.infoProjet[0];
     const reportRows = this.selectedFile.data.rapport;
-    const total = reportRows.reduce((sum, row) => sum + Number(row.montant || 0), 0);
+    const reportSummary = this.reportSummary;
+    const total = this.globalSummary.total;
     const payments = this.selectedFile.data.paiements;
     const phases = this.selectedFile.data.planification;
     const planningChartImage = this.createPlanningChartImage();
+    const timelineChartImage = this.createTimelineChartImage();
+    const costChartImage = this.createCostChartImage();
+    const data = this.selectedFile.data;
+    const reportSections = [
+      this.reportTable('Informations du projet', data.infoProjet as unknown as Row[], ['client', 'description', 'dateDebutPrevue', 'dateDebutReelle', 'dateFinPrevue', 'dateFinReelle', 'etat']),
+      this.reportTable('Factures avec BC', data.factures as unknown as Row[], ['fournisseur', 'description', 'numeroFacture', 'numeroBC', 'montantTotal']),
+      this.reportTable('Autres factures', data.autresFactures as unknown as Row[], ['fournisseur', 'description', 'montant', 'date']),
+      this.reportTable('Restauration', data.restauration as unknown as Row[], ['date', 'montant', 'description']),
+      this.reportTable('Logistique', data.logistique as unknown as Row[], ['type', 'date', 'montant', 'description']),
+      this.reportTable('Charge service interne', data.charges as unknown as Row[], ['employe', 'nombreJoursTravail', 'montantJour', 'montantTotal', 'description']),
+      this.reportTable('Paiements', data.paiements as unknown as Row[], ['fournisseur', 'date', 'etat', 'montant']),
+      this.reportTable('Planification', data.planification as unknown as Row[], ['phase', 'dateDebut', 'dateFin', 'dateFinReelle', 'nombreJours', 'pourcentageRealisation', 'avanceRetard', 'etat']),
+      this.reportTable('Sous-traitance', data.sousTraitance as unknown as Row[], ['collaborateur', 'contact', 'description', 'montant'])
+    ].join('');
     const paid = payments.filter((payment) => payment.etat === 'PAYE').reduce((sum, payment) => sum + Number(payment.montant || 0), 0);
-    const planned = payments.filter((payment) => payment.etat === 'PLANIFIE').reduce((sum, payment) => sum + Number(payment.montant || 0), 0);
+    const planned = payments.filter((payment) => payment.etat === 'NON_PAYE').reduce((sum, payment) => sum + Number(payment.montant || 0), 0);
     const popup = window.open('', '_blank', 'width=1000,height=800');
 
     if (!popup) {
@@ -796,14 +1414,15 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
       return;
     }
 
-    const money = (value: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(value);
+    const money = (value: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'TND', minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(value || 0);
     popup.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Rapport - ${this.selectedFile.name}</title><style>
       *{box-sizing:border-box}body{margin:0;background:#f4f7fb;color:#172033;font:14px Arial,sans-serif}.report{max-width:920px;margin:32px auto;background:#fff;padding:48px;box-shadow:0 12px 40px #17203318}.head{display:flex;justify-content:space-between;border-bottom:3px solid #2563eb;padding-bottom:28px}.eyebrow{color:#2563eb;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase}.title{font:700 38px Georgia,serif;margin:10px 0}.meta{color:#64748b;text-align:right}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:28px 0}.card{padding:18px;background:#eff6ff;border-left:4px solid #2563eb}.card span{display:block;color:#64748b;font-size:11px;text-transform:uppercase}.card strong{display:block;margin-top:8px;font-size:23px}.section{margin-top:30px}.section h2{font:700 22px Georgia,serif}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #e2e8f0}th{background:#f8fafc;color:#475569;font-size:11px;text-transform:uppercase}.amount{text-align:right}.status{font-weight:700;color:#166534}.chart{display:block;width:100%;margin:12px 0 20px}.footer{margin-top:36px;color:#94a3b8;font-size:11px}@media print{body{background:#fff}.report{margin:0;box-shadow:none;width:100%}}</style></head><body><main class="report">
-      <header class="head"><div><div class="eyebrow">Project Cost · Rapport financier</div><h1 class="title">${project?.client || this.selectedFile.name}</h1><div>${project?.description || 'Synthèse du projet'}</div></div><div class="meta">${this.selectedFile.name}<br>${new Date().toLocaleDateString('fr-FR')}</div></header>
+      <header class="head"><div><div class="eyebrow">Project Cost · Rapport financier</div><h1 class="title">${project?.client || this.selectedFile.name}</h1><div>${project?.description || 'Synthèse du projet'}</div></div><div class="meta">${this.selectedFile.name}<br>${new Date().toLocaleDateString('fr-FR')}<br><strong>${reportSummary.etatProjet}</strong></div></header>
       <section class="cards"><div class="card"><span>Coût total</span><strong>${money(total)}</strong></div><div class="card"><span>Paiements effectués</span><strong>${money(paid)}</strong></div><div class="card"><span>Paiements planifiés</span><strong>${money(planned)}</strong></div></section>
-      <section class="section"><h2>Répartition des coûts</h2><table><thead><tr><th>Catégorie</th><th class="amount">Montant</th></tr></thead><tbody>${reportRows.map((row) => `<tr><td>${row.categorie}</td><td class="amount">${money(Number(row.montant || 0))}</td></tr>`).join('')}</tbody></table></section>
-      <section class="section"><h2>Paiements</h2><table><thead><tr><th>Fournisseur</th><th>Date</th><th>État</th><th class="amount">Montant</th></tr></thead><tbody>${payments.map((payment) => `<tr><td>${payment.fournisseur}</td><td>${payment.date}</td><td class="status">${payment.etat === 'PAYE' ? 'Payé' : 'Planifié'}</td><td class="amount">${money(Number(payment.montant || 0))}</td></tr>`).join('')}</tbody></table></section>
-      <section class="section"><h2>Planning du projet</h2>${planningChartImage ? `<img class="chart" src="${planningChartImage}" alt="Graphique du planning">` : ''}<table><thead><tr><th>Phase</th><th>Date début</th><th>Date fin</th><th>Jours</th><th>Avance / retard</th><th>État</th></tr></thead><tbody>${phases.map((phase) => `<tr><td>${phase.phase}</td><td>${phase.dateDebut}</td><td>${phase.dateFin}</td><td>${phase.nombreJours}</td><td>${phase.avanceRetard > 0 ? `${phase.avanceRetard} j d'avance` : phase.avanceRetard < 0 ? `${Math.abs(phase.avanceRetard)} j de retard` : 'Dans les délais'}</td><td class="status">${phase.etat === 'TERMINE' ? 'Clôturé' : phase.etat === 'EN_COURS' ? 'En cours' : phase.etat === 'EN_RETARD' ? 'En retard' : 'Planifié'}</td></tr>`).join('')}</tbody></table></section>
+      <section class="section"><h2>Répartition des coûts</h2><table><thead><tr><th>Catégorie</th><th class="amount">Montant</th></tr></thead><tbody><tr><td>Factures avec BC</td><td class="amount">${money(reportSummary.factures)}</td></tr><tr><td>Autres factures</td><td class="amount">${money(reportSummary.autresFactures)}</td></tr><tr><td>Restauration</td><td class="amount">${money(reportSummary.restauration)}</td></tr><tr><td>Logistique</td><td class="amount">${money(reportSummary.logistique)}</td></tr><tr><td>Charge service interne</td><td class="amount">${money(reportSummary.charges)}</td></tr><tr><td>Sous-traitance</td><td class="amount">${money(reportSummary.sousTraitance)}</td></tr><tr><th>Coût total</th><th class="amount">${money(total)}</th></tr></tbody></table></section>
+      ${planningChartImage ? `<section class="section"><h2>Graphique du planning</h2><img class="chart" src="${planningChartImage}" alt="Graphique du planning">${timelineChartImage ? `<img class="chart" src="${timelineChartImage}" alt="Chronologie des phases et réalisation">` : ''}</section>` : ''}
+      <section class="section"><h2>Graphique des coûts</h2><img class="chart" src="${costChartImage}" alt="Répartition des coûts du projet"></section>
+      ${reportSections}
       <div class="footer">Document généré par Project Cost</div></main><script>window.onload=()=>window.print()</script></body></html>`);
     popup.document.close();
   }
@@ -825,7 +1444,7 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
       return sheet ? (this.xlsx.utils.sheet_to_json<T>(sheet) ?? []) : [];
     };
 
-    return {
+    return this.withCalculatedProjectTiming({
       infoProjet: readSheet<Projet>(PROJECT_WORKBOOK_SHEETS.infoProjet),
       factures: readSheet<Facture>(PROJECT_WORKBOOK_SHEETS.factures),
       autresFactures: readSheet<AutreFacture>(PROJECT_WORKBOOK_SHEETS.autresFactures),
@@ -834,7 +1453,16 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
       charges: readSheet<ChargeSociete>(PROJECT_WORKBOOK_SHEETS.charges),
       paiements: readSheet<Paiement>(PROJECT_WORKBOOK_SHEETS.paiements),
       planification: readSheet<PhaseProjet>(PROJECT_WORKBOOK_SHEETS.planification),
+      sousTraitance: readSheet<SousTraitance>(PROJECT_WORKBOOK_SHEETS.sousTraitance),
       rapport: readSheet<ProjetRapport>(PROJECT_WORKBOOK_SHEETS.rapport)
-    };
+    });
+  }
+
+  private withCalculatedProjectTiming(data: ProjectWorkbook): ProjectWorkbook {
+    data.infoProjet = data.infoProjet.map((project) => ({
+      ...project,
+      ...this.xlsxData.calculateProjectTiming(project)
+    }));
+    return data;
   }
 }
