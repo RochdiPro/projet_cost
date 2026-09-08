@@ -9,9 +9,10 @@ interface Supplier {
   nom: string;
   adresse: string;
   materielVendu: string;
-  description: string;
   contact: string;
+  nomContact: string;
   categorie: string;
+  [field: string]: string;
 }
 
 type SheetRow = Record<string, unknown>;
@@ -30,6 +31,7 @@ const STORAGE_KEY = 'project-cost-suppliers';
           <a routerLink="/dashboard">Tableau de bord</a>
           <a routerLink="/projects">Projets</a>
           <a routerLink="/products">Produits</a>
+          <a routerLink="/employees">Employés</a>
           <button type="button" (click)="logout()">Quitter</button>
         </nav>
       </header>
@@ -45,34 +47,35 @@ const STORAGE_KEY = 'project-cost-suppliers';
             Importer XLSX
             <input type="file" accept=".xlsx,.xls" (change)="importSuppliers($event)" />
           </label>
+          <button type="button" (click)="saveFile()">Sauvegarder XLSX</button>
+          <button type="button" (click)="printList()">Imprimer PDF</button>
           <button type="button" (click)="openCreateModal()">Nouveau fournisseur</button>
         </div>
       </section>
 
       <section class="content">
+        <div class="filters">
+          @for (column of columns; track column) {
+            <label>{{ column }}<input [name]="'filter-' + column" [(ngModel)]="filters[column]" placeholder="Rechercher" /></label>
+          }
+        </div>
         <div class="table-box">
           <table>
             <thead>
               <tr>
-                <th>Nom</th>
-                <th>Adresse</th>
-                <th>Materiel vendu</th>
-                <th>Description</th>
-                <th>Contact</th>
-                <th>Categorie</th>
-                <th>Actions</th>
+                @for (column of columns; track column) {
+                  <th>{{ column }}</th>
+                }
+                <th class="action-column">Actions</th>
               </tr>
             </thead>
             <tbody>
-              @for (supplier of suppliers; track supplier.id) {
+              @for (supplier of filteredSuppliers; track supplier.id) {
                 <tr>
-                  <td><strong>{{ supplier.nom }}</strong></td>
-                  <td>{{ supplier.adresse || '-' }}</td>
-                  <td>{{ supplier.materielVendu || '-' }}</td>
-                  <td>{{ supplier.description || '-' }}</td>
-                  <td>{{ supplier.contact || '-' }}</td>
-                  <td><span class="pill">{{ supplier.categorie || '-' }}</span></td>
-                  <td>
+                  @for (column of columns; track column) {
+                    <td [class.primary-cell]="column === 'nom'"><strong>{{ supplier[column] || '-' }}</strong></td>
+                  }
+                  <td class="action-column">
                     <div class="row-actions">
                       <button type="button" (click)="openEditModal(supplier)">Modifier</button>
                       <button type="button" class="danger" (click)="deleteSupplier(supplier.id)">Supprimer</button>
@@ -80,7 +83,7 @@ const STORAGE_KEY = 'project-cost-suppliers';
                   </td>
                 </tr>
               } @empty {
-                <tr><td colspan="7" class="empty">Aucun fournisseur enregistre.</td></tr>
+                <tr><td [attr.colspan]="columns.length + 1" class="empty">Aucun fournisseur enregistre.</td></tr>
               }
             </tbody>
           </table>
@@ -93,6 +96,7 @@ const STORAGE_KEY = 'project-cost-suppliers';
             <h2>{{ editingId ? 'Modifier fournisseur' : 'Ajouter fournisseur' }}</h2>
             <div class="fields">
               <label>Nom<input name="nom" [(ngModel)]="draft.nom" required /></label>
+              <label>Nom du contact<input name="nomContact" [(ngModel)]="draft.nomContact" /></label>
               <label>Contact<input name="contact" [(ngModel)]="draft.contact" /></label>
               <label>Adresse<input name="adresse" [(ngModel)]="draft.adresse" /></label>
               <label>Categorie
@@ -101,7 +105,6 @@ const STORAGE_KEY = 'project-cost-suppliers';
                 </select>
               </label>
               <label>Materiel vendu<input name="materielVendu" [(ngModel)]="draft.materielVendu" /></label>
-              <label class="wide">Description<textarea name="description" [(ngModel)]="draft.description"></textarea></label>
             </div>
             <div class="actions">
               <button type="button" class="ghost" (click)="closeModal()">Annuler</button>
@@ -129,6 +132,9 @@ const STORAGE_KEY = 'project-cost-suppliers';
     .import { position:relative; display:inline-flex; align-items:center; min-height:40px; box-sizing:border-box; }
     .import input { display:none; }
     .content { padding:28px clamp(20px,7vw,96px) 70px; }
+    .filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:18px; }
+    .filters label { min-width:0; }
+    .filters input { padding:9px 10px; }
     .table-box { overflow:auto; border:1px solid #d9ddd4; background:#fffdf8; }
     table { width:100%; min-width:980px; border-collapse:collapse; }
     th, td { padding:13px 12px; border-bottom:1px solid #e5e7df; text-align:left; vertical-align:top; }
@@ -150,6 +156,17 @@ const STORAGE_KEY = 'project-cost-suppliers';
     input:focus, select:focus, textarea:focus { outline:2px solid rgba(222,105,72,.18); border-color:#de6948; }
     .actions { justify-content:flex-end; margin-top:18px; }
     @media (max-width:760px) { nav, .head, .head-actions { flex-wrap:wrap; } .head { display:block; } .head-actions { margin-top:22px; } .fields { grid-template-columns:1fr; } }
+    @media print {
+      .topbar, .head-actions, .row-actions, .modal-backdrop, .filters, .action-column { display:none !important; }
+      .page, .head, .content, .table-box { background:#fff !important; color:#000 !important; }
+      .head { padding:0 0 20px; }
+      .head h1, .head p { color:#000 !important; }
+      .content { padding:0; }
+      .table-box { border:0; overflow:visible; }
+      table { min-width:0; }
+      th { background:#eee !important; color:#000 !important; }
+      td, th { border-color:#999; }
+    }
   `]
 })
 export class SuppliersComponent implements OnInit {
@@ -157,13 +174,32 @@ export class SuppliersComponent implements OnInit {
   private readonly xlsxData = inject(XlsxDataService);
   categories = ['Automatisme', 'Inox', 'Informatique', 'Electricite', 'Mecanique', 'Logistique', 'Autre'];
   suppliers: Supplier[] = [];
+  columns: string[] = this.defaultColumns();
+  filters: Record<string, string> = {};
   editingId = '';
   isModalOpen = false;
   message = '';
   draft: Supplier = this.emptySupplier();
 
-  ngOnInit(): void {
-    this.suppliers = this.loadSuppliers();
+  get filteredSuppliers(): Supplier[] {
+    return this.suppliers.filter((supplier) => this.columns.every((column) => {
+      const filter = this.normalizeKey(this.filters[column] ?? '');
+      if (!filter) return true;
+      return this.normalizeKey(String(supplier[column] ?? '')).includes(filter);
+    }));
+  }
+
+  async ngOnInit(): Promise<void> {
+    this.suppliers = [];
+    this.refreshColumns();
+
+    try {
+      const rows = await this.xlsxData.importAsset<SheetRow>('assets/fournisseur.xlsx');
+      this.suppliers = this.rowsToSuppliers(rows);
+      this.refreshColumns();
+    } catch {
+      this.suppliers = [];
+    }
   }
 
   openCreateModal(): void {
@@ -190,6 +226,7 @@ export class SuppliersComponent implements OnInit {
       ? this.suppliers.map((item) => item.id === this.editingId ? supplier : item)
       : [supplier, ...this.suppliers];
     this.persist();
+    this.refreshColumns();
     this.closeModal();
     this.message = `${supplier.nom} enregistre.`;
   }
@@ -204,11 +241,18 @@ export class SuppliersComponent implements OnInit {
     const file = input.files?.[0];
     if (!file) return;
 
+    if (file.name.toLowerCase() !== 'fournisseur.xlsx') {
+      this.message = 'Le fichier doit etre nomme fournisseur.xlsx.';
+      input.value = '';
+      return;
+    }
+
     try {
       const rows = await this.xlsxData.importSheet<SheetRow>(file);
-      const imported = rows.map((row) => this.supplierFromRow(row)).filter((supplier) => supplier.nom);
-      this.suppliers = this.mergeByName(this.suppliers, imported);
+      const imported = this.rowsToSuppliers(rows);
+      this.suppliers = imported;
       this.persist();
+      this.refreshColumns();
       this.message = `${imported.length} fournisseur(s) importe(s) depuis ${file.name}.`;
     } catch {
       this.message = 'Impossible de lire le fichier fournisseurs.';
@@ -217,25 +261,70 @@ export class SuppliersComponent implements OnInit {
     }
   }
 
+  async saveFile(): Promise<void> {
+    const rows = this.suppliers.map((supplier) =>
+      Object.fromEntries(this.columns.map((column) => [column, supplier[column] ?? '']))
+    );
+
+    try {
+      await this.xlsxData.saveSheetToAssets('fournisseur.xlsx', 'Fournisseurs', rows);
+      this.message = `${rows.length} fournisseur(s) sauvegarde(s) dans fournisseur.xlsx.`;
+    } catch {
+      this.message = 'Impossible de sauvegarder fournisseur.xlsx.';
+    }
+  }
+
+  printList(): void {
+    window.print();
+  }
+
   logout(): void {
     this.auth.logout();
     location.href = '/login';
   }
 
   private emptySupplier(): Supplier {
-    return { id: '', nom: '', adresse: '', materielVendu: '', description: '', contact: '', categorie: this.categories?.[0] ?? 'Automatisme' };
+    return { id: '', nom: '', adresse: '', materielVendu: '', contact: '', nomContact: '', categorie: this.categories?.[0] ?? 'Automatisme' };
   }
 
   private supplierFromRow(row: SheetRow): Supplier {
     return {
+      ...Object.fromEntries(
+        Object.entries(row)
+          .filter(([key]) => this.normalizeKey(key) !== 'description')
+          .map(([key, value]) => [key, String(value ?? '').trim()])
+      ),
       id: crypto.randomUUID(),
       nom: this.cell(row, ['nom', 'name', 'fournisseur', 'supplier']),
       adresse: this.cell(row, ['adresse', 'address', 'adr']),
       materielVendu: this.cell(row, ['materielvendu', 'materiel', 'material', 'produits', 'products']),
-      description: this.cell(row, ['description', 'desc']),
       contact: this.cell(row, ['contact', 'telephone', 'tel', 'phone', 'email']),
+      nomContact: this.cell(row, ['nomcontact', 'contactnom', 'nomresponsable', 'responsable', 'personnecontact']),
       categorie: this.cell(row, ['categorie', 'category']) || 'Autre'
     };
+  }
+
+  private rowsToSuppliers(rows: SheetRow[]): Supplier[] {
+    return rows
+      .map((row) => this.supplierFromRow(row))
+      .filter((supplier) => Object.entries(supplier).some(([key, value]) => key !== 'id' && value.trim()));
+  }
+
+  private refreshColumns(): void {
+    const columns = [...new Set(this.suppliers.flatMap((supplier) => Object.keys(supplier)))].filter(
+      (column) => column !== 'id'
+    );
+
+    this.columns = columns.length ? columns.filter((column) => {
+      const hasSourceAlias = columns.some(
+        (other) => other !== column && this.normalizeKey(other) === this.normalizeKey(column)
+      );
+      return this.normalizeKey(column) !== 'description' && !(hasSourceAlias && this.defaultColumns().includes(column));
+    }) : this.defaultColumns();
+  }
+
+  private defaultColumns(): string[] {
+    return ['nom', 'adresse', 'materielVendu', 'nomContact', 'contact', 'categorie'];
   }
 
   private cell(row: SheetRow, names: string[]): string {

@@ -132,6 +132,7 @@ Chart.register(...registerables);
           <a routerLink="/dashboard">Tableau de bord</a>
           <a routerLink="/suppliers">Fournisseurs</a>
           <a routerLink="/products">Produits</a>
+          <a routerLink="/employees">Employés</a>
           <button type="button" (click)="logout()">Quitter</button>
         </nav>
       </header>
@@ -176,7 +177,7 @@ Chart.register(...registerables);
             <div class="empty">
               <span>□</span>
               <h2>Aucun fichier Excel</h2>
-              <p>Ajoutez un fichier dans <b>src/assets</b> ou importez-le.</p>
+              <p>Ajoutez un fichier dans <b>src/assets/projets</b> ou importez-le.</p>
             </div>
           }
         </div>
@@ -899,7 +900,7 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
       this.files = await Promise.all(
         names.map(async (name) => ({
           name,
-          data: this.withCalculatedProjectTiming(await this.xlsxData.importProjectWorkbookFromAsset(`assets/${name}`)),
+          data: this.withCalculatedProjectTiming(await this.xlsxData.importProjectWorkbookFromAsset(`assets/projets/${name}`)),
           fromAssets: true
         }))
       );
@@ -909,9 +910,9 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
 
     if (!this.files.length) {
       this.files = [defaultFile];
-      this.message = 'Fichier de démonstration chargé. Enregistrez-le pour le créer dans src/assets.';
+      this.message = 'Fichier de démonstration chargé. Enregistrez-le pour le créer dans src/assets/projets.';
     } else {
-      this.message = `${this.files.length} fichier(s) Excel chargé(s) depuis src/assets.`;
+      this.message = `${this.files.length} fichier(s) Excel chargé(s) depuis src/assets/projets.`;
     }
 
     this.selectedFile = this.files[0];
@@ -1061,9 +1062,9 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
       this.files = this.files.filter((file) => file.name !== fileName);
       this.selectedFile = this.files[0];
       this.closeModal();
-      this.message = `${fileName} supprimé de src/assets.`;
+      this.message = `${fileName} supprimé de src/assets/projets.`;
     } catch {
-      this.message = `Impossible de supprimer ${fileName} de src/assets.`;
+      this.message = `Impossible de supprimer ${fileName} de src/assets/projets.`;
     }
   }
 
@@ -1115,9 +1116,9 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
       }
       this.selectedFile.name = fileName;
       this.selectedFile.fromAssets = true;
-      this.message = `${fileName} enregistré dans src/assets.`;
+      this.message = `${fileName} enregistré dans src/assets/projets.`;
     } catch {
-      this.message = `Impossible d'enregistrer ${fileName} dans src/assets.`;
+      this.message = `Impossible d'enregistrer ${fileName} dans src/assets/projets.`;
     }
   }
 

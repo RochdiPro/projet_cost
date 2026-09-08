@@ -27,6 +27,14 @@ export class XlsxDataService {
     return firstValueFrom(this.http.get<string[]>('http://localhost:3000/api/projects/files'));
   }
 
+  async listEmployeeFiles(): Promise<string[]> {
+    return firstValueFrom(this.http.get<string[]>('http://localhost:3000/api/employees/files'));
+  }
+
+  async deleteEmployeeFile(fileName: string): Promise<void> {
+    await firstValueFrom(this.http.delete(`http://localhost:3000/api/employees/file?fileName=${encodeURIComponent(fileName)}`));
+  }
+
   async deleteAssetFile(fileName: string): Promise<void> {
     await firstValueFrom(this.http.delete(`http://localhost:3000/api/projects/file?fileName=${encodeURIComponent(fileName)}`));
   }
@@ -112,6 +120,30 @@ export class XlsxDataService {
     const content = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
     await firstValueFrom(
       this.http.post(`http://localhost:3000/api/projects/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
+        headers: { 'Content-Type': 'application/octet-stream' }
+      })
+    );
+  }
+
+  async saveSheetToAssets(fileName: string, sheetName: string, rows: object[]): Promise<void> {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), sheetName);
+    const content = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+
+    await firstValueFrom(
+      this.http.post(`http://localhost:3000/api/assets/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
+        headers: { 'Content-Type': 'application/octet-stream' }
+      })
+    );
+  }
+
+  async saveEmployeeSheetToAssets(fileName: string, rows: object[]): Promise<void> {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), 'Taches');
+    const content = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+
+    await firstValueFrom(
+      this.http.post(`http://localhost:3000/api/employees/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
         headers: { 'Content-Type': 'application/octet-stream' }
       })
     );

@@ -35,6 +35,7 @@ const SUPPLIERS_KEY = 'project-cost-suppliers';
           <a routerLink="/dashboard">Tableau de bord</a>
           <a routerLink="/projects">Projets</a>
           <a routerLink="/suppliers">Fournisseurs</a>
+          <a routerLink="/employees">Employés</a>
           <button type="button" (click)="logout()">Quitter</button>
         </nav>
       </header>
@@ -50,11 +51,20 @@ const SUPPLIERS_KEY = 'project-cost-suppliers';
             Importer XLSX
             <input type="file" accept=".xlsx,.xls" (change)="importProducts($event)" />
           </label>
+          <button type="button" (click)="saveFile()">Sauvegarder XLSX</button>
+          <button type="button" (click)="printList()">Imprimer PDF</button>
           <button type="button" (click)="openCreateModal()">Nouveau produit</button>
         </div>
       </section>
 
       <section class="content">
+        <div class="filters">
+          <label>Nom<input name="filter-nom" [(ngModel)]="filters.nom" placeholder="Rechercher" /></label>
+          <label>Reference<input name="filter-reference" [(ngModel)]="filters.reference" placeholder="Rechercher" /></label>
+          <label>Prix<input name="filter-prix" [(ngModel)]="filters.prix" placeholder="Rechercher" /></label>
+          <label>Last update<input name="filter-lastUpdate" [(ngModel)]="filters.lastUpdate" placeholder="Rechercher" /></label>
+          <label>Fournisseur<input name="filter-fournisseur" [(ngModel)]="filters.fournisseur" placeholder="Rechercher" /></label>
+        </div>
         <div class="table-box">
           <table>
             <thead>
@@ -65,13 +75,13 @@ const SUPPLIERS_KEY = 'project-cost-suppliers';
                 <th>Prix</th>
                 <th>Last update</th>
                 <th>Fournisseur</th>
-                <th>Actions</th>
+                <th class="action-column">Actions</th>
               </tr>
             </thead>
             <tbody>
-              @for (product of products; track product.id) {
+              @for (product of filteredProducts; track product.id) {
                 <tr>
-                  <td>
+                  <td class="action-column">
                     <div class="thumb">
                       @if (product.image) {
                         <img [src]="product.image" [alt]="product.nom" />
@@ -150,6 +160,9 @@ const SUPPLIERS_KEY = 'project-cost-suppliers';
     .import { position:relative; display:inline-flex; align-items:center; min-height:40px; box-sizing:border-box; }
     .import input { display:none; }
     .content { padding:28px clamp(20px,7vw,96px) 70px; }
+    .filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:18px; }
+    .filters label { min-width:0; }
+    .filters input { padding:9px 10px; }
     .table-box { overflow:auto; border:1px solid #d9ddd4; background:#fffdf8; }
     table { width:100%; min-width:940px; border-collapse:collapse; }
     th, td { padding:13px 12px; border-bottom:1px solid #e5e7df; text-align:left; vertical-align:middle; }
@@ -171,6 +184,17 @@ const SUPPLIERS_KEY = 'project-cost-suppliers';
     .preview { width:118px; aspect-ratio:1; display:grid; place-items:center; margin-top:16px; background:#eef1eb; color:#87918c; overflow:hidden; font:700 11px 'Courier New',monospace; }
     .actions { justify-content:flex-end; margin-top:18px; }
     @media (max-width:760px) { nav, .head, .head-actions { flex-wrap:wrap; } .head { display:block; } .head-actions { margin-top:22px; } .fields { grid-template-columns:1fr; } }
+    @media print {
+      .topbar, .head-actions, .row-actions, .modal-backdrop, .filters, .action-column { display:none !important; }
+      .page, .head, .content, .table-box { background:#fff !important; color:#000 !important; }
+      .head { padding:0 0 20px; }
+      .head h1, .head p { color:#000 !important; }
+      .content { padding:0; }
+      .table-box { border:0; overflow:visible; }
+      table { min-width:0; }
+      th { background:#eee !important; color:#000 !important; }
+      td, th { border-color:#999; }
+    }
   `]
 })
 export class ProductsComponent implements OnInit {
@@ -182,10 +206,30 @@ export class ProductsComponent implements OnInit {
   isModalOpen = false;
   message = '';
   draft: Product = this.emptyProduct();
+  filters: Record<'nom' | 'reference' | 'prix' | 'lastUpdate' | 'fournisseur', string> = {
+    nom: '', reference: '', prix: '', lastUpdate: '', fournisseur: ''
+  };
 
-  ngOnInit(): void {
+  get filteredProducts(): Product[] {
+    return this.products.filter((product) => Object.entries(this.filters).every(([field, value]) => {
+      const filter = this.normalizeKey(value);
+      if (!filter) return true;
+      return this.normalizeKey(String(product[field as keyof Product] ?? '')).includes(filter);
+    }));
+  }
+
+  async ngOnInit(): Promise<void> {
     this.refreshSuppliers();
-    this.products = this.loadProducts();
+    this.products = [];
+
+    try {
+      const rows = await this.xlsxData.importAsset<SheetRow>('assets/produit.xlsx');
+      this.products = rows
+        .map((row) => this.productFromRow(row))
+        .filter((product) => product.nom || product.reference);
+    } catch {
+      this.products = [];
+    }
   }
 
   openCreateModal(): void {
@@ -228,10 +272,16 @@ export class ProductsComponent implements OnInit {
     const file = input.files?.[0];
     if (!file) return;
 
+    if (file.name.toLowerCase() !== 'produit.xlsx') {
+      this.message = 'Le fichier doit etre nomme produit.xlsx.';
+      input.value = '';
+      return;
+    }
+
     try {
       const rows = await this.xlsxData.importSheet<SheetRow>(file);
       const imported = rows.map((row) => this.productFromRow(row)).filter((product) => product.nom || product.reference);
-      this.products = this.mergeByReference(this.products, imported);
+      this.products = imported;
       this.persist();
       this.message = `${imported.length} produit(s) importe(s) depuis ${file.name}.`;
     } catch {
@@ -239,6 +289,21 @@ export class ProductsComponent implements OnInit {
     } finally {
       input.value = '';
     }
+  }
+
+  async saveFile(): Promise<void> {
+    const rows = this.products.map(({ id, ...product }) => product);
+
+    try {
+      await this.xlsxData.saveSheetToAssets('produit.xlsx', 'Produits', rows);
+      this.message = `${rows.length} produit(s) sauvegarde(s) dans produit.xlsx.`;
+    } catch {
+      this.message = 'Impossible de sauvegarder produit.xlsx.';
+    }
+  }
+
+  printList(): void {
+    window.print();
   }
 
   formatPrice(value: number | null): string {
