@@ -23,6 +23,31 @@ import { XlsxDataService } from '../../core/services/xlsx-data.service';
 type SheetKey = keyof ProjectWorkbook;
 type Row = Record<string, string | number | boolean | null>;
 
+interface PaymentTrancheDraft {
+  tranche: number;
+  pourcentage: number | string | null;
+  jours: number | string | null;
+}
+
+interface AutoPaymentDraft {
+  fournisseur: string;
+  montantTotal: number;
+  dateLivraison: string;
+  tranches: PaymentTrancheDraft[];
+}
+
+export function validateAutoPaymentTranches(tranches: PaymentTrancheDraft[] | null | undefined): void {
+  const visible = (tranches ?? []).filter((tranche) => Number(tranche.pourcentage ?? 0) > 0);
+  if (!visible.length) {
+    throw new Error('Aucune tranche avec pourcentage valide.');
+  }
+
+  const percentTotal = visible.reduce((sum, tranche) => sum + Number(tranche.pourcentage ?? 0), 0);
+  if (percentTotal !== 100) {
+    throw new Error('La somme des pourcentages de tranches doit être exactement 100%.');
+  }
+}
+
 interface ProjectFile {
   name: string;
   data: ProjectWorkbook;
@@ -193,6 +218,7 @@ Chart.register(...registerables);
               <div class="file-actions">
                 <button type="button" class="action add" title="Ajouter une ligne" [disabled]="activeSheet === 'infoProjet'" (click)="addRow()">＋</button>
                 <button type="button" class="action save" title="Enregistrer le fichier" (click)="saveFile()">✓</button>
+                <button type="button" class="action print-sheet" title="Imprimer l'onglet actif" (click)="printActiveSheet()">▤</button>
                 <button type="button" class="action report" title="Imprimer le rapport" (click)="printReport()">▤</button>
                 <button type="button" class="action delete" title="Supprimer le fichier" (click)="askDeleteFile()">🗑</button>
               </div>
@@ -220,10 +246,14 @@ Chart.register(...registerables);
               <section class="sheet-summary" aria-label="Résumé de la feuille active">
                 <div><small>Éléments</small><strong>{{ sheetSummary.count }}</strong></div>
                 <div><small>Coût total</small><strong>{{ formatAmount(sheetSummary.total) }}</strong></div>
+                @if (activeSheet === 'paiements') {
+                  <div><small>Total payé</small><strong>{{ formatAmount(paymentSummary.paye) }}</strong></div>
+                  <div><small>Total non payé</small><strong>{{ formatAmount(paymentSummary.nonPaye) }}</strong></div>
+                }
               </section>
             }
 
-            @if (hasFilter('fournisseur') || hasFilter('etat')) {
+            @if (hasFilter('fournisseur') || hasFilter('etat') || activeSheet === 'paiements') {
               <div class="filters" aria-label="Filtres de la feuille">
                 @if (hasFilter('fournisseur')) {
                   <label>Fournisseur
@@ -239,6 +269,14 @@ Chart.register(...registerables);
                       <option value="">Tous les états</option>
                       @for (state of states; track state.value) { <option [value]="state.value">{{ state.label }}</option> }
                     </select>
+                  </label>
+                }
+                @if (activeSheet === 'paiements') {
+                  <label>Date début
+                    <input type="date" [(ngModel)]="paymentStartDate" (ngModelChange)="refreshPlanningChart()" />
+                  </label>
+                  <label>Date fin
+                    <input type="date" [(ngModel)]="paymentEndDate" (ngModelChange)="refreshPlanningChart()" />
                   </label>
                 }
               </div>
@@ -321,6 +359,43 @@ Chart.register(...registerables);
                 <div class="modal-actions">
                   <button type="button" class="cancel" (click)="closeModal()">Annuler</button>
                   <button type="button" class="danger" (click)="deleteRow()">Confirmer</button>
+                </div>
+              } @else if (modalMode === 'auto-payment') {
+                <h2>Créer un paiement automatique</h2>
+                <p>Entrez le montant, le fournisseur, la date de livraison et les tranches.</p>
+                <div class="fields-grid">
+                  <label class="field">
+                    Fournisseur
+                    <input type="text" [(ngModel)]="autoPaymentDraft.fournisseur" />
+                  </label>
+                  <label class="field">
+                    Montant total
+                    <input type="number" min="0" step="0.01" [(ngModel)]="autoPaymentDraft.montantTotal" />
+                  </label>
+                  <label class="field">
+                    Date de livraison
+                    <input type="date" [(ngModel)]="autoPaymentDraft.dateLivraison" />
+                  </label>
+                </div>
+                <div class="tranches-grid">
+                  <table class="tranches-table">
+                    <thead>
+                      <tr><th>Tranche</th><th>Pourcentage</th><th>Jours après livraison</th></tr>
+                    </thead>
+                    <tbody>
+                      @for (tranche of autoPaymentDraft.tranches; track tranche.tranche) {
+                        <tr>
+                          <td><strong>Tranche {{ tranche.tranche }}</strong></td>
+                          <td><input type="number" min="0" max="100" step="1" [(ngModel)]="autoPaymentDraft.tranches[$index].pourcentage" /></td>
+                          <td><input type="number" min="0" step="1" [(ngModel)]="autoPaymentDraft.tranches[$index].jours" /></td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+                <div class="modal-actions">
+                  <button type="button" class="cancel" (click)="closeModal()">Annuler</button>
+                  <button type="button" class="save-text" (click)="saveAutoPaymentSchedule()">Créer</button>
                 </div>
               } @else {
                 <h2>{{ modalTitle }}</h2>
@@ -410,6 +485,7 @@ Chart.register(...registerables);
       .action { width: 36px; height: 36px; border: 1px solid #dbeafe; background: #eff6ff; cursor: pointer; }
       .action:disabled { opacity: .4; cursor: not-allowed; }
       .action.save { background: #e0f2fe; }
+      .action.print-sheet { background: #dcfce7; color: #166534; }
       .action.report { background: #fef3c7; color: #92400e; }
       .action.delete { background: #fee2e2; }
       .tabs { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 16px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
@@ -488,10 +564,13 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
   activeSheet: SheetKey = 'infoProjet';
   supplierFilter = '';
   stateFilter = '';
+  paymentStartDate = '';
+  paymentEndDate = '';
   message = '';
-  modalMode: '' | 'row' | 'delete-row' | 'file' = '';
+  modalMode: '' | 'row' | 'delete-row' | 'file' | 'auto-payment' = '';
   editingRow?: Row;
   draftRow: Row = {};
+  autoPaymentDraft: AutoPaymentDraft = this.createEmptyAutoPaymentDraft();
 
   readonly sheets: Array<{ key: SheetKey; label: string; icon: string }> = [
     { key: 'infoProjet', label: 'INFO_PROJET', icon: '⌂' },
@@ -516,9 +595,12 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
 
   get filteredRows(): Row[] {
     return this.rows.filter((row) => {
-      const supplierMatches = !this.supplierFilter || String(row['fournisseur'] ?? '') === this.supplierFilter;
-      const stateMatches = !this.stateFilter || String(row['etat'] ?? '') === this.stateFilter;
-      return supplierMatches && stateMatches;
+      const supplierMatches = !this.supplierFilter || String(row['fournisseur'] ?? '').trim() === this.supplierFilter.trim();
+      const stateMatches = !this.stateFilter || String(row['etat'] ?? '').trim() === this.stateFilter.trim();
+      const paymentDate = String(row['date'] ?? '').trim();
+      const startDateMatches = this.activeSheet !== 'paiements' || !this.paymentStartDate || this.compareDates(paymentDate, this.paymentStartDate) >= 0;
+      const endDateMatches = this.activeSheet !== 'paiements' || !this.paymentEndDate || this.compareDates(paymentDate, this.paymentEndDate) <= 0;
+      return supplierMatches && stateMatches && startDateMatches && endDateMatches;
     });
   }
 
@@ -527,12 +609,27 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   get states(): Array<{ value: string; label: string }> {
-    const available = new Set(this.rows.map((row) => String(row['etat'] ?? '')));
+    const available = new Set(this.rows.map((row) => String(row['etat'] ?? '').trim()));
     return this.statusOptions.filter((state) => available.has(state.value));
   }
 
   hasFilter(field: 'fournisseur' | 'etat'): boolean {
     return this.rows.some((row) => row[field] !== undefined);
+  }
+
+  get paymentSummary(): { paye: number; nonPaye: number } {
+    return this.filteredRows.reduce<{ paye: number; nonPaye: number }>((summary, row) => {
+      const amount = Number(String(row['montant'] ?? 0).replace(',', '.')) || 0;
+      if (String(row['etat'] ?? '').trim() === 'PAYE') summary['paye'] += amount;
+      else if (String(row['etat'] ?? '').trim() === 'NON_PAYE') summary['nonPaye'] += amount;
+      return summary;
+    }, { paye: 0, nonPaye: 0 });
+  }
+
+  private compareDates(left: string, right: string): number {
+    const leftDate = this.parsePlanningDate(left)?.getTime() ?? 0;
+    const rightDate = this.parsePlanningDate(right)?.getTime() ?? 0;
+    return leftDate - rightDate;
   }
 
   refreshPlanningChart(): void {
@@ -969,6 +1066,8 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     this.activeSheet = sheet;
     this.supplierFilter = '';
     this.stateFilter = '';
+    this.paymentStartDate = '';
+    this.paymentEndDate = '';
     if (sheet === 'planification') setTimeout(() => this.renderPlanningChart());
   }
 
@@ -1143,6 +1242,77 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     }
 
     this.selectedFile.name = this.projectFileName(this.selectedFile);
+  }
+
+  private createEmptyAutoPaymentDraft(): AutoPaymentDraft {
+    return {
+      fournisseur: '',
+      montantTotal: 0,
+      dateLivraison: '',
+      tranches: [
+        { tranche: 1, pourcentage: null, jours: null },
+        { tranche: 2, pourcentage: null, jours: null },
+        { tranche: 3, pourcentage: null, jours: null },
+        { tranche: 4, pourcentage: null, jours: null }
+      ]
+    };
+  }
+
+  openAutoPaymentModal(): void {
+    this.modalMode = 'auto-payment';
+    this.autoPaymentDraft = this.createEmptyAutoPaymentDraft();
+  }
+
+  saveAutoPaymentSchedule(): void {
+    if (!this.selectedFile) {
+      return;
+    }
+
+    const supplier = String(this.autoPaymentDraft.fournisseur ?? '').trim();
+    const total = Number(String(this.autoPaymentDraft.montantTotal ?? 0).replace(',', '.')) || 0;
+    const dateLivraison = String(this.autoPaymentDraft.dateLivraison ?? '').trim();
+
+    if (!supplier || total <= 0 || !dateLivraison) {
+      this.message = 'Fournisseur, montant total et date de livraison sont obligatoires.';
+      return;
+    }
+
+    const deliveryDate = this.parsePlanningDate(dateLivraison);
+    if (!deliveryDate) {
+      this.message = 'Date de livraison invalide.';
+      return;
+    }
+
+    try {
+      validateAutoPaymentTranches(this.autoPaymentDraft.tranches);
+    } catch (error) {
+      this.message = error instanceof Error ? error.message : 'La validation des tranches a échoué.';
+      return;
+    }
+
+    const tranches = (this.autoPaymentDraft.tranches ?? []).filter((tranche) => Number(tranche.pourcentage ?? 0) > 0);
+    const rows = this.selectedFile.data.paiements as unknown as Row[];
+    const generated: Row[] = [];
+
+    for (const tranche of tranches) {
+      const percent = Number(tranche.pourcentage ?? 0);
+      const amount = total * (percent / 100);
+      const daysAfter = Number(tranche.jours ?? 0);
+      const due = new Date(deliveryDate);
+      due.setDate(due.getDate() + Math.max(0, daysAfter));
+
+      generated.push({
+        id: `PAY-${Date.now()}-${tranche.tranche}`,
+        fournisseur: supplier,
+        date: this.formatPlanningDate(due),
+        etat: 'NON_PAYE',
+        montant: Number(amount.toFixed(2))
+      });
+    }
+
+    rows.push(...generated);
+    this.closeModal();
+    this.message = `${generated.length} paiement(s) automatique(s) créé(s).`;
   }
 
   get planningStats(): { total: number; completed: number; progress: number; variance: number } {
@@ -1382,6 +1552,36 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     return String(value ?? '');
   }
 
+  printActiveSheet(): void {
+    if (!this.selectedFile) return;
+
+    const sheet = this.sheets.find((item) => item.key === this.activeSheet);
+    const columns = this.headers.length ? this.headers : this.defaultHeaders[this.activeSheet];
+    const section = this.reportTable(sheet?.label ?? this.activeSheet, this.filteredRows, columns);
+    const summary = this.sheetSummary;
+    const activeFilters = [
+      this.supplierFilter.trim() ? `Fournisseur: ${this.supplierFilter.trim()}` : '',
+      this.stateFilter.trim() ? `État: ${this.cellValue('etat', this.stateFilter.trim())}` : '',
+      this.activeSheet === 'paiements' && this.paymentStartDate ? `Date début: ${this.paymentStartDate}` : '',
+      this.activeSheet === 'paiements' && this.paymentEndDate ? `Date fin: ${this.paymentEndDate}` : ''
+    ].filter(Boolean);
+    const filters = activeFilters.length ? `<div class="filters"><strong>Filtres:</strong> ${activeFilters.join(' · ')}</div>` : '';
+    const financialCards = this.activeSheet === 'paiements'
+      ? `<div class="card"><span>Total payé</span><strong>${this.formatAmount(this.paymentSummary.paye)}</strong></div><div class="card"><span>Total non payé</span><strong>${this.formatAmount(this.paymentSummary.nonPaye)}</strong></div>`
+      : '';
+    const popup = window.open('', '_blank', 'width=1000,height=800');
+
+    if (!popup) {
+      this.message = 'Autorisez les fenêtres popup pour imprimer la feuille.';
+      return;
+    }
+
+    popup.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${sheet?.label ?? this.activeSheet}</title><style>
+      *{box-sizing:border-box}body{margin:0;padding:32px;background:#fff;color:#172033;font:14px Arial,sans-serif}h1{margin:0 0 24px;font:700 30px Georgia,serif}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:18px}.card{padding:14px;background:#f1f5f9;border-left:4px solid #2563eb}.card span{display:block;color:#64748b;font-size:11px;text-transform:uppercase}.card strong{display:block;margin-top:6px;font-size:20px}.filters{margin-bottom:18px;padding:10px 12px;background:#fff7ed;color:#9a3412}.section h2{display:none}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #dbe3ee}th{background:#f1f5f9;color:#475569;font-size:11px;text-transform:uppercase}@media print{body{padding:0}}
+    </style></head><body><h1>${sheet?.label ?? this.activeSheet}</h1><section class="cards"><div class="card"><span>Éléments</span><strong>${summary.count}</strong></div><div class="card"><span>Coût total</span><strong>${this.formatAmount(summary.total)}</strong></div>${financialCards}</section>${filters}${section}<script>window.onload=()=>window.print()</script></body></html>`);
+    popup.document.close();
+  }
+
   printReport(): void {
     if (!this.selectedFile) return;
 
@@ -1432,6 +1632,7 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     this.modalMode = '';
     this.editingRow = undefined;
     this.draftRow = {};
+    this.autoPaymentDraft = this.createEmptyAutoPaymentDraft();
   }
 
   logout(): void {

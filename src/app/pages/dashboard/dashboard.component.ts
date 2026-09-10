@@ -18,8 +18,7 @@ import { AuthService } from '../../core/services/auth.service';
           <button (click)="logout()">Quitter</button>
         </nav>
       </header>
-
-     
+    
       <section class="features">
         <div class="section-heading">
           <p class="eyebrow">Vos espaces de gestion.</p>
