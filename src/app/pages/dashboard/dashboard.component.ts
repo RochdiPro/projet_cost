@@ -15,6 +15,7 @@ import { AuthService } from '../../core/services/auth.service';
           <a routerLink="/suppliers">Fournisseurs</a>
           <a routerLink="/products">Produits</a>
           <a routerLink="/employees">Employés</a>
+          <a routerLink="/vehicles">Véhicules</a>
           <button (click)="logout()">Quitter</button>
         </nav>
       </header>
@@ -48,6 +49,12 @@ import { AuthService } from '../../core/services/auth.service';
             <p>Suivez le temps de travail et les tâches de l'équipe.</p>
             <a routerLink="/employees">Ouvrir <span>-></span></a>
           </article>
+          <article class="module-vehicles">
+            <span class="number">05</span>
+            <h3>Véhicules</h3>
+            <p>Gérez les immatriculations, visites, assurances, taxes et frais.</p>
+            <a routerLink="/vehicles">Ouvrir <span>-></span></a>
+          </article>
         </div>
       </section>
 
@@ -75,7 +82,7 @@ import { AuthService } from '../../core/services/auth.service';
     .features { padding:78px clamp(24px,10vw,150px); }
     .section-heading { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:40px; }
     h2 { margin:0; font:700 clamp(34px,5vw,58px)/1 Georgia,serif; letter-spacing:0; }
-    .feature-grid { display:grid; grid-template-columns:repeat(4,1fr); border-top:1px solid #bec8be; }
+    .feature-grid { display:grid; grid-template-columns:repeat(5,1fr); border-top:1px solid #bec8be; }
     article { min-height:230px; padding:27px 26px 25px; border-right:1px solid #bec8be; }
     article:not(:first-child) { padding-left:26px; }
     article:last-child { border-right:0; }
@@ -83,10 +90,12 @@ import { AuthService } from '../../core/services/auth.service';
     .module-suppliers { background:#fff0df; }
     .module-products { background:#e6eef6; }
     .module-employees { background:#e9e1f4; }
+    .module-vehicles { background:#eaf6ee; }
     .module-projects .number, .module-projects a, .module-projects a span { color:#e7b86a; }
     .module-suppliers .number, .module-suppliers a span { color:#bd632e; }
     .module-products .number, .module-products a span { color:#2d6a9f; }
     .module-employees .number, .module-employees a span { color:#7650a5; }
+    .module-vehicles .number, .module-vehicles a span { color:#2f8b58; }
     .number { font:700 12px 'Courier New',monospace; }
     h3 { margin:22px 0 13px; font:700 27px Georgia,serif; }
     article p { max-width:300px; color:#68766e; font-size:14px; line-height:1.65; }

@@ -23,13 +23,23 @@ import { XlsxDataService } from '../../core/services/xlsx-data.service';
 type SheetKey = keyof ProjectWorkbook;
 type Row = Record<string, string | number | boolean | null>;
 
-interface PaymentTrancheDraft {
+export interface PaymentTrancheDraft {
   tranche: number;
   pourcentage: number | string | null;
   jours: number | string | null;
 }
 
-interface AutoPaymentDraft {
+export interface AutoPaymentDraft {
+  nom: string;
+  fournisseur: string;
+  montantTotal: number;
+  dateLivraison: string;
+  nombreTranches: number;
+  tranches: PaymentTrancheDraft[];
+}
+
+export interface AutoPaymentScheduleInput {
+  nom: string;
   fournisseur: string;
   montantTotal: number;
   dateLivraison: string;
@@ -46,6 +56,40 @@ export function validateAutoPaymentTranches(tranches: PaymentTrancheDraft[] | nu
   if (percentTotal !== 100) {
     throw new Error('La somme des pourcentages de tranches doit être exactement 100%.');
   }
+}
+
+export function buildAutoPaymentRows(input: AutoPaymentScheduleInput): Row[] {
+  const supplier = String(input.fournisseur ?? '').trim();
+  const total = Number(String(input.montantTotal ?? 0).replace(',', '.')) || 0;
+  const dateLivraison = String(input.dateLivraison ?? '').trim();
+  const deliveryDate = new Date(`${dateLivraison}T00:00:00`);
+
+  if (!supplier || total <= 0 || !dateLivraison || Number.isNaN(deliveryDate.getTime())) {
+    throw new Error('Fournisseur, montant total et date de livraison sont obligatoires.');
+  }
+
+  validateAutoPaymentTranches(input.tranches);
+
+  const tranches = (input.tranches ?? []).filter((tranche) => Number(tranche.pourcentage ?? 0) > 0);
+  return tranches.map((tranche) => {
+    const percent = Number(tranche.pourcentage ?? 0);
+    const grossAmount = total * (percent / 100);
+    const retenuSource = grossAmount * 0.01;
+    const netAmount = grossAmount - retenuSource;
+    const daysAfter = Number(tranche.jours ?? 0);
+    const due = new Date(deliveryDate);
+    due.setDate(due.getDate() + Math.max(0, daysAfter));
+
+    return {
+      id: `PAY-${Date.now()}-${tranche.tranche}`,
+      nom: String(input.nom ?? '').trim(),
+      fournisseur: supplier,
+      date: due.toISOString().slice(0, 10),
+      etat: 'NON_PAYE',
+      montant: Number(netAmount.toFixed(2)),
+      retenuSource: Number(retenuSource.toFixed(2))
+    } as Row;
+  });
 }
 
 interface ProjectFile {
@@ -217,6 +261,9 @@ Chart.register(...registerables);
 
               <div class="file-actions">
                 <button type="button" class="action add" title="Ajouter une ligne" [disabled]="activeSheet === 'infoProjet'" (click)="addRow()">＋</button>
+                @if (activeSheet === 'paiements') {
+                  <button type="button" class="action auto-payment" title="Créer un paiement automatique" (click)="openAutoPaymentModal()">✦</button>
+                }
                 <button type="button" class="action save" title="Enregistrer le fichier" (click)="saveFile()">✓</button>
                 <button type="button" class="action print-sheet" title="Imprimer l'onglet actif" (click)="printActiveSheet()">▤</button>
                 <button type="button" class="action report" title="Imprimer le rapport" (click)="printReport()">▤</button>
@@ -362,8 +409,12 @@ Chart.register(...registerables);
                 </div>
               } @else if (modalMode === 'auto-payment') {
                 <h2>Créer un paiement automatique</h2>
-                <p>Entrez le montant, le fournisseur, la date de livraison et les tranches.</p>
+                <p>Entrez le nom, le fournisseur, le montant total, la date de livraison, le nombre de tranches et les pourcentages.</p>
                 <div class="fields-grid">
+                  <label class="field">
+                    Nom
+                    <input type="text" [(ngModel)]="autoPaymentDraft.nom" />
+                  </label>
                   <label class="field">
                     Fournisseur
                     <input type="text" [(ngModel)]="autoPaymentDraft.fournisseur" />
@@ -375,6 +426,10 @@ Chart.register(...registerables);
                   <label class="field">
                     Date de livraison
                     <input type="date" [(ngModel)]="autoPaymentDraft.dateLivraison" />
+                  </label>
+                  <label class="field">
+                    Nombre de tranches
+                    <input type="number" min="1" step="1" [(ngModel)]="autoPaymentDraft.nombreTranches" (ngModelChange)="syncAutoPaymentTranchesCount()" />
                   </label>
                 </div>
                 <div class="tranches-grid">
@@ -1246,9 +1301,11 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
 
   private createEmptyAutoPaymentDraft(): AutoPaymentDraft {
     return {
+      nom: '',
       fournisseur: '',
       montantTotal: 0,
       dateLivraison: '',
+      nombreTranches: 4,
       tranches: [
         { tranche: 1, pourcentage: null, jours: null },
         { tranche: 2, pourcentage: null, jours: null },
@@ -1256,6 +1313,26 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
         { tranche: 4, pourcentage: null, jours: null }
       ]
     };
+  }
+
+  syncAutoPaymentTranchesCount(): void {
+    const expected = Math.max(1, Math.min(12, Number(this.autoPaymentDraft.nombreTranches || 1)));
+    this.autoPaymentDraft.nombreTranches = expected;
+
+    while (this.autoPaymentDraft.tranches.length < expected) {
+      const nextTranche = this.autoPaymentDraft.tranches.length + 1;
+      this.autoPaymentDraft.tranches.push({ tranche: nextTranche, pourcentage: null, jours: null });
+    }
+
+    while (this.autoPaymentDraft.tranches.length > expected) {
+      this.autoPaymentDraft.tranches.pop();
+    }
+
+    this.autoPaymentDraft.tranches = this.autoPaymentDraft.tranches.map((tranche, index) => ({
+      tranche: index + 1,
+      pourcentage: tranche.pourcentage,
+      jours: tranche.jours
+    }));
   }
 
   openAutoPaymentModal(): void {
@@ -1268,51 +1345,22 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
       return;
     }
 
-    const supplier = String(this.autoPaymentDraft.fournisseur ?? '').trim();
-    const total = Number(String(this.autoPaymentDraft.montantTotal ?? 0).replace(',', '.')) || 0;
-    const dateLivraison = String(this.autoPaymentDraft.dateLivraison ?? '').trim();
-
-    if (!supplier || total <= 0 || !dateLivraison) {
-      this.message = 'Fournisseur, montant total et date de livraison sont obligatoires.';
-      return;
-    }
-
-    const deliveryDate = this.parsePlanningDate(dateLivraison);
-    if (!deliveryDate) {
-      this.message = 'Date de livraison invalide.';
-      return;
-    }
-
     try {
-      validateAutoPaymentTranches(this.autoPaymentDraft.tranches);
-    } catch (error) {
-      this.message = error instanceof Error ? error.message : 'La validation des tranches a échoué.';
-      return;
-    }
-
-    const tranches = (this.autoPaymentDraft.tranches ?? []).filter((tranche) => Number(tranche.pourcentage ?? 0) > 0);
-    const rows = this.selectedFile.data.paiements as unknown as Row[];
-    const generated: Row[] = [];
-
-    for (const tranche of tranches) {
-      const percent = Number(tranche.pourcentage ?? 0);
-      const amount = total * (percent / 100);
-      const daysAfter = Number(tranche.jours ?? 0);
-      const due = new Date(deliveryDate);
-      due.setDate(due.getDate() + Math.max(0, daysAfter));
-
-      generated.push({
-        id: `PAY-${Date.now()}-${tranche.tranche}`,
-        fournisseur: supplier,
-        date: this.formatPlanningDate(due),
-        etat: 'NON_PAYE',
-        montant: Number(amount.toFixed(2))
+      const rows = this.selectedFile.data.paiements as unknown as Row[];
+      const generated = buildAutoPaymentRows({
+        nom: String(this.autoPaymentDraft.nom ?? '').trim(),
+        fournisseur: String(this.autoPaymentDraft.fournisseur ?? '').trim(),
+        montantTotal: Number(String(this.autoPaymentDraft.montantTotal ?? 0).replace(',', '.')) || 0,
+        dateLivraison: String(this.autoPaymentDraft.dateLivraison ?? '').trim(),
+        tranches: this.autoPaymentDraft.tranches
       });
-    }
 
-    rows.push(...generated);
-    this.closeModal();
-    this.message = `${generated.length} paiement(s) automatique(s) créé(s).`;
+      rows.push(...generated);
+      this.closeModal();
+      this.message = `${generated.length} paiement(s) automatique(s) créé(s).`;
+    } catch (error) {
+      this.message = error instanceof Error ? error.message : 'La création du paiement automatique a échoué.';
+    }
   }
 
   get planningStats(): { total: number; completed: number; progress: number; variance: number } {

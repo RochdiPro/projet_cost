@@ -14,7 +14,10 @@ import {
   ChargeSociete,
   Paiement,
   PhaseProjet,
-  SousTraitance
+  SousTraitance,
+  Vehicule,
+  VehiculeFrais,
+  VehiculeWorkbook
 } from '../models/project-cost.models';
 
 @Injectable({ providedIn: 'root' })
@@ -147,6 +150,41 @@ export class XlsxDataService {
         headers: { 'Content-Type': 'application/octet-stream' }
       })
     );
+  }
+
+  async importVehicleWorkbook(assetPath: string): Promise<VehiculeWorkbook> {
+    const response = await firstValueFrom(this.http.get(assetPath, { responseType: 'arraybuffer' }));
+    return this.readVehicleWorkbook(XLSX.read(response, { type: 'array' }));
+  }
+
+  async importVehicleWorkbookFromFile(file: File): Promise<VehiculeWorkbook> {
+    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    return this.readVehicleWorkbook(workbook);
+  }
+
+  async saveVehicleWorkbookToAssets(fileName: string, data: VehiculeWorkbook): Promise<void> {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(data.vehicules), 'Vehicules');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(data.depenses), 'Frais');
+    const content = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+
+    await firstValueFrom(
+      this.http.post(`http://localhost:3000/api/assets/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
+        headers: { 'Content-Type': 'application/octet-stream' }
+      })
+    );
+  }
+
+  private readVehicleWorkbook(workbook: XLSX.WorkBook): VehiculeWorkbook {
+    const read = <T>(sheetName: string): T[] => {
+      const sheet = workbook.Sheets[sheetName] ?? workbook.Sheets[sheetName.toLowerCase()];
+      return sheet ? XLSX.utils.sheet_to_json<T>(sheet) : [];
+    };
+
+    return {
+      vehicules: read<Vehicule>('Vehicules'),
+      depenses: read<VehiculeFrais>('Frais')
+    };
   }
 
   calculateProjectReport(data: Omit<ProjectWorkbook, 'rapport'>): ProjetRapport[] {

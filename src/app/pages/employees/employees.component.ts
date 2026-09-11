@@ -228,7 +228,7 @@ type SheetRow = Record<string, unknown>;
     .content { padding:28px clamp(20px,7vw,96px) 70px; }
     .message, .source { color:#68766e; line-height:1.5; }
     .print-title { display:none; }
-    .filters { display:grid; grid-template-columns:repeat(3, minmax(150px, 1fr)); gap:12px; margin-bottom:20px; }
+    .filters { display:grid; grid-template-columns:repeat(4, minmax(150px, 1fr)); gap:12px; margin-bottom:20px; }
     label { display:grid; gap:6px; color:#52645d; font-size:12px; font-weight:700; }
     select { width:100%; box-sizing:border-box; border:1px solid #c8d0c8; background:#fff; color:#17221f; padding:11px 12px; font:14px Arial,sans-serif; }
     .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:22px; }

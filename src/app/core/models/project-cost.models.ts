@@ -97,10 +97,12 @@ export interface ProjetRapport {
 
 export interface Paiement {
   id: string;
+  nom?: string;
   montant: number;
   fournisseur: string;
   date: string;
   etat: 'PAYE' | 'NON_PAYE';
+  retenuSource?: number;
 }
 
 export interface PhaseProjet {
@@ -112,6 +114,30 @@ export interface PhaseProjet {
   pourcentageRealisation: number;
   avanceRetard: number;
   etat: ProjectStatus;
+}
+
+export interface Vehicule {
+  id: string;
+  matricule: string;
+  visiteTechnique: string;
+  assurance: string;
+  taxe: string;
+  prochainKilometrageVidange?: number;
+}
+
+export interface VehiculeFrais {
+  id: string;
+  vehiculeId?: string;
+  montant: number;
+  description: string;
+  categorie: 'reparation' | 'gazoil' | 'vidange' | string;
+  prochainKilometrage?: number;
+  kilometrage?: number;
+}
+
+export interface VehiculeWorkbook {
+  vehicules: Vehicule[];
+  depenses: VehiculeFrais[];
 }
 
 export interface SousTraitance {
