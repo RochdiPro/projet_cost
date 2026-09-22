@@ -26,6 +26,13 @@ interface ReportLine {
   taches: number;
 }
 
+interface TaskDistributionLine {
+  projet: string;
+  tache: string;
+  heures: number;
+  taches: number;
+}
+
 type SheetRow = Record<string, unknown>;
 
 @Component({
@@ -150,6 +157,42 @@ type SheetRow = Record<string, unknown>;
           </div>
         </section>
 
+        <section class="report-section employee-detail-report">
+          <div class="section-heading"><div><small>Détail imprimable</small><h2>Heures et répartition des tâches par employé</h2></div><strong>{{ employeeDetailNames.length }} employé(s)</strong></div>
+          @for (employee of employeeDetailNames; track employee) {
+            <article class="employee-report-block">
+              <div class="employee-report-heading">
+                <div><h3>{{ employee }}</h3><span>{{ employeePost(employee) }}</span></div>
+                <strong>{{ formatHours(employeeReportLine(employee).heures) }} · {{ employeeReportLine(employee).taches }} tâche(s)</strong>
+              </div>
+              <div class="table-box">
+                <table>
+                  <thead><tr><th>Répartition</th><th>Tâche</th><th>Nombre</th><th>Heures</th></tr></thead>
+                  <tbody>
+                    @for (line of taskDistributionFor(employee); track line.projet + line.tache) {
+                      <tr><td>{{ line.projet || '-' }}</td><td>{{ line.tache || '-' }}</td><td>{{ line.taches }}</td><td>{{ formatHours(line.heures) }}</td></tr>
+                    } @empty {
+                      <tr><td colspan="4" class="empty">Aucune tâche pour cette période.</td></tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+              <div class="table-box task-list-box">
+                <table>
+                  <thead><tr><th>Date</th><th>Projet</th><th>Tâche</th><th>Heures</th><th>Fichier</th></tr></thead>
+                  <tbody>
+                    @for (task of tasksForEmployee(employee); track task.id) {
+                      <tr><td>{{ task.date || '-' }}</td><td>{{ task.projet || '-' }}</td><td>{{ task.tache || '-' }}</td><td>{{ formatHours(task.dureeHeures) }}</td><td>{{ task.source }}</td></tr>
+                    } @empty {
+                      <tr><td colspan="5" class="empty">Aucune tâche pour cette période.</td></tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          }
+        </section>
+
         <p class="source">Source : fichiers Excel de <b>src/assets/employees</b>. Colonnes reconnues : nom, poste, tache, dureeHeures et date.</p>
       </section>
 
@@ -267,7 +310,7 @@ type SheetRow = Record<string, unknown>;
     .project-list span { display:flex; gap:8px; }
     .project-list button { padding:8px 10px; }
     .project-list .danger { background:#fff; border:1px solid #efb4a6; color:#a43d28; }
-    @media print { .topbar, .head-actions, .filters, .row-actions, .report-actions button, .modal-backdrop { display:none !important; } .head { padding:0 0 20px; background:#fff !important; color:#000 !important; } .head h1, .head p { color:#000 !important; } .content { padding:0; } .charts { grid-template-columns:repeat(2,1fr); } .chart-card { break-inside:avoid; } .table-box { overflow:visible; border:0; } .report-section { break-inside:avoid; } .print-title { display:block; margin:0 0 20px; } }
+    @media print { .topbar, .head-actions, .filters, .row-actions, .report-actions button, .modal-backdrop { display:none !important; } .head { padding:0 0 20px; background:#fff !important; color:#000 !important; } .head h1, .head p { color:#000 !important; } .content { padding:0; } .charts { grid-template-columns:repeat(2,1fr); } .chart-card { break-inside:avoid; } .table-box { overflow:visible; border:0; } .report-section, .employee-report-block { break-inside:avoid; } .employee-report-heading { display:flex; justify-content:space-between; align-items:flex-end; border-bottom:1px solid #999; margin-top:20px; padding-bottom:6px; } .employee-report-heading h3 { margin:0; } .employee-report-heading span { color:#555; } .task-list-box { margin-top:10px; } .print-title { display:block; margin:0 0 20px; } }
     @media (max-width:800px) { nav { flex-wrap:wrap; justify-content:flex-end; gap:10px; } .head { display:block; } .head-actions { margin-top:22px; } .filters, .stats, .charts { grid-template-columns:1fr; } .modal-fields { grid-template-columns:1fr; } .wide { grid-column:auto; } }
   `]
 })
@@ -346,6 +389,7 @@ export class EmployeesComponent implements OnInit, AfterViewInit, OnDestroy {
   get totalHours(): number { return this.filteredTasks.reduce((sum, task) => sum + task.dureeHeures, 0); }
   get activeEmployees(): number { return new Set(this.filteredTasks.map((task) => task.nom)).size; }
   get periodLabel(): string { return this.isPrintAll ? 'toutes les dates' : this.selectedMonth ? `${this.monthOptions[this.selectedMonth - 1].label} ${this.selectedYear}` : `année ${this.selectedYear}`; }
+  get employeeDetailNames(): string[] { return [...new Set(this.filteredTasks.map((task) => task.nom))].sort((a, b) => a.localeCompare(b)); }
 
   get employeeReport(): ReportLine[] {
     const report = this.reportBy(this.filteredTasks, (task) => task.nom);
@@ -364,6 +408,24 @@ export class EmployeesComponent implements OnInit, AfterViewInit, OnDestroy {
 
   employeePost(name: string): string { return this.employeePosts[name] || this.filteredTasks.find((task) => task.nom === name)?.poste || '-'; }
   formatHours(hours: number): string { return `${hours.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} h`; }
+  employeeReportLine(name: string): ReportLine {
+    const rows = this.tasksForEmployee(name);
+    return { label: name, heures: this.hours(rows), taches: rows.length };
+  }
+  tasksForEmployee(name: string): EmployeeTask[] { return this.filteredTasks.filter((task) => task.nom === name); }
+  taskDistributionFor(name: string): TaskDistributionLine[] {
+    const grouped = new Map<string, TaskDistributionLine>();
+    for (const task of this.tasksForEmployee(name)) {
+      const projet = task.projet || 'Sans projet';
+      const tache = task.tache || 'Sans tâche';
+      const key = `${projet}\u0000${tache}`;
+      const current = grouped.get(key) ?? { projet, tache, heures: 0, taches: 0 };
+      current.heures += task.dureeHeures;
+      current.taches += 1;
+      grouped.set(key, current);
+    }
+    return [...grouped.values()].sort((a, b) => b.heures - a.heures || a.projet.localeCompare(b.projet));
+  }
   logout(): void { this.auth.logout(); location.href = '/login'; }
   refreshCharts(): void { if (this.viewReady) setTimeout(() => { this.renderTaskChart(); this.renderEmployeeChart(); }); }
   openAddEmployee(): void { this.draft = this.emptyDraft(); this.isAddingEmployee = true; this.isEditingEmployee = false; this.isModalOpen = true; }

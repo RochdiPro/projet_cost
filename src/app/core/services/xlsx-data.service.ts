@@ -34,6 +34,44 @@ export class XlsxDataService {
     return firstValueFrom(this.http.get<string[]>('http://localhost:3000/api/employees/files'));
   }
 
+  async listMissionFiles(): Promise<string[]> {
+    return firstValueFrom(this.http.get<string[]>('http://localhost:3000/api/mission/files'));
+  }
+
+  async deleteMissionFile(fileName: string): Promise<void> {
+    await firstValueFrom(this.http.delete(`http://localhost:3000/api/mission/file?fileName=${encodeURIComponent(fileName)}`));
+  }
+
+  async importMissionWorkbook(fileName: string): Promise<{ missionRows: Record<string, unknown>[]; taskRows: Record<string, unknown>[] }> {
+    const response = await firstValueFrom(this.http.get(`http://localhost:3000/assets/mission/${encodeURIComponent(fileName)}`, { responseType: 'arraybuffer' }));
+    return this.readMissionWorkbook(XLSX.read(response, { type: 'array' }));
+  }
+
+  async importMissionWorkbookFromFile(file: File): Promise<{ missionRows: Record<string, unknown>[]; taskRows: Record<string, unknown>[] }> {
+    return this.readMissionWorkbook(XLSX.read(await file.arrayBuffer(), { type: 'array' }));
+  }
+
+  private readMissionWorkbook(workbook: XLSX.WorkBook): { missionRows: Record<string, unknown>[]; taskRows: Record<string, unknown>[] } {
+    const read = (sheetName: string): Record<string, unknown>[] => {
+      const sheet = workbook.Sheets[sheetName];
+      return sheet ? XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet) : [];
+    };
+    return { missionRows: read('Mission'), taskRows: read('LotsTaches') };
+  }
+
+  async saveMissionWorkbook(fileName: string, missionRows: object[], taskRows: object[]): Promise<void> {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(missionRows), 'Mission');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(taskRows), 'LotsTaches');
+    const content = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+
+    await firstValueFrom(
+      this.http.post(`http://localhost:3000/api/mission/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
+        headers: { 'Content-Type': 'application/octet-stream' }
+      })
+    );
+  }
+
   async deleteEmployeeFile(fileName: string): Promise<void> {
     await firstValueFrom(this.http.delete(`http://localhost:3000/api/employees/file?fileName=${encodeURIComponent(fileName)}`));
   }

@@ -37,5 +37,10 @@ export const routes: Routes = [
 		canActivate: [authGuard],
 		loadComponent: () => import('./pages/vehicles/vehicles-clean.component').then((module) => module.VehiclesCleanComponent)
 	},
+	{
+		path: 'missions',
+		canActivate: [authGuard],
+		loadComponent: () => import('./pages/missions/missions.component').then((module) => module.MissionsComponent)
+	},
 	{ path: '**', redirectTo: 'dashboard' }
 ];

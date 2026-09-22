@@ -16,6 +16,7 @@ import { AuthService } from '../../core/services/auth.service';
           <a routerLink="/products">Produits</a>
           <a routerLink="/employees">Employés</a>
           <a routerLink="/vehicles">Véhicules</a>
+          <a routerLink="/missions">Missions</a>
           <button (click)="logout()">Quitter</button>
         </nav>
       </header>
@@ -55,6 +56,12 @@ import { AuthService } from '../../core/services/auth.service';
             <p>Gérez les immatriculations, visites, assurances, taxes et frais.</p>
             <a routerLink="/vehicles">Ouvrir <span>-></span></a>
           </article>
+          <article class="module-missions">
+            <span class="number">06</span>
+            <h3>Missions</h3>
+            <p>Organisez les missions, lots et tâches avec leur avancement.</p>
+            <a routerLink="/missions">Ouvrir <span>-></span></a>
+          </article>
         </div>
       </section>
 
@@ -91,11 +98,13 @@ import { AuthService } from '../../core/services/auth.service';
     .module-products { background:#e6eef6; }
     .module-employees { background:#e9e1f4; }
     .module-vehicles { background:#eaf6ee; }
+    .module-missions { background:#f8eadc; }
     .module-projects .number, .module-projects a, .module-projects a span { color:#e7b86a; }
     .module-suppliers .number, .module-suppliers a span { color:#bd632e; }
     .module-products .number, .module-products a span { color:#2d6a9f; }
     .module-employees .number, .module-employees a span { color:#7650a5; }
     .module-vehicles .number, .module-vehicles a span { color:#2f8b58; }
+    .module-missions .number, .module-missions a span { color:#bd632e; }
     .number { font:700 12px 'Courier New',monospace; }
     h3 { margin:22px 0 13px; font:700 27px Georgia,serif; }
     article p { max-width:300px; color:#68766e; font-size:14px; line-height:1.65; }

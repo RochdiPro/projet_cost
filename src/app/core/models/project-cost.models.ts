@@ -140,6 +140,31 @@ export interface VehiculeWorkbook {
   depenses: VehiculeFrais[];
 }
 
+export interface MissionTache {
+  id: string;
+  nom: string;
+  dateDebut: string;
+  dateFin: string;
+  description: string;
+  avancement: number;
+}
+
+export interface MissionLot {
+  id: string;
+  nom: string;
+  description: string;
+  taches: MissionTache[];
+}
+
+export interface MissionAppel {
+  id: string;
+  nom: string;
+  dateDebut: string;
+  dateFin: string;
+  description: string;
+  lots: MissionLot[];
+}
+
 export interface SousTraitance {
   collaborateur: string;
   contact: string;
