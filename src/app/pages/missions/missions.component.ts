@@ -5,17 +5,6 @@ import { AuthService } from '../../core/services/auth.service';
 import { XlsxDataService } from '../../core/services/xlsx-data.service';
 import { MissionAppel, MissionLot, MissionTache } from '../../core/models/project-cost.models';
 
-interface MissionTimelineEntry {
-  id: string;
-  kind: 'lot' | 'tache';
-  nom: string;
-  dateDebut: string;
-  dateFin: string;
-  description: string;
-  avancement: number;
-  lotNom?: string;
-}
-
 @Component({
   selector: 'app-missions',
   standalone: true,
@@ -144,7 +133,6 @@ interface MissionTimelineEntry {
 
         @if (selectedMission) {
           <section class="print-summary">
-            <small>Rapport mission</small>
             <h2>{{ selectedMission.nom }}</h2>
             <p class="print-description">{{ selectedMission.description || 'Aucune description' }}</p>
             <div class="print-progress"><strong>{{ formatPercent(missionProgress(selectedMission)) }}</strong><span>Avancement global</span><div class="progress-track"><i [style.width.%]="missionProgress(selectedMission)"></i></div></div>
@@ -154,23 +142,58 @@ interface MissionTimelineEntry {
               <div class="late-stat"><strong>{{ lateLotCount(selectedMission) }}</strong><span>Lots en retard</span></div>
               <div class="late-stat"><strong>{{ lateTaskCount(selectedMission) }}</strong><span>Tâches en retard</span></div>
             </div>
-            <div class="print-timeline">
-              @for (entry of missionTimeline(selectedMission); track entry.id) {
-                <div class="print-timeline-entry" [class.late-entry]="isLate(entry.dateFin, entry.avancement)">
-                  <div class="print-timeline-dot"></div>
-                  <div class="print-timeline-content">
-                    <div class="print-timeline-meta"><strong>{{ entry.kind === 'lot' ? 'LOT' : 'TÂCHE' }}</strong><span>{{ entry.dateDebut || '-' }} → {{ entry.dateFin || '-' }}</span></div>
-                    <h4>{{ entry.nom }}</h4>
-                    @if (entry.kind === 'tache') { <p>Lot : {{ entry.lotNom }}</p> }
-                    <small>{{ entry.description || 'Aucune description' }}</small>
-                    <div class="print-timeline-progress"><span>{{ formatPercent(entry.avancement) }}</span><div class="progress-track"><i [style.width.%]="entry.avancement"></i></div></div>
-                    @if (isLate(entry.dateFin, entry.avancement)) { <b class="late-label">EN RETARD</b> }
-                  </div>
-                </div>
-              } @empty {
-                <p class="empty">Aucun lot ou tâche dans cette mission.</p>
+            <section class="print-report-section">
+              <h3>Tableau récapitulatif des lots</h3>
+              @if (selectedMission.lots.length) {
+                <table class="print-table lot-summary-table">
+                  <thead><tr><th>Lot</th><th>Description</th><th>Période</th><th>Avancement</th><th>État</th></tr></thead>
+                  <tbody>
+                    @for (lot of selectedMission.lots; track lot.id) {
+                      <tr>
+                        <td><strong>{{ lot.nom }}</strong></td>
+                        <td>{{ lot.description || 'Aucune description' }}</td>
+                        <td>{{ lotStartDate(lot) || '-' }} → {{ lotEndDate(lot) || '-' }}</td>
+                        <td>{{ formatPercent(lotProgress(lot)) }}</td>
+                        <td>{{ !lotEndDate(lot) ? 'Non planifié' : isLate(lotEndDate(lot), lotProgress(lot)) ? 'En retard' : 'Dans les délais' }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              } @else {
+                <p class="empty">Aucun lot dans cette mission.</p>
               }
-            </div>
+            </section>
+            <section class="print-report-section task-details-section">
+              <h3>Détail des lots et des tâches</h3>
+              @for (lot of selectedMission.lots; track lot.id) {
+                <article class="print-lot-detail">
+                  <div class="print-lot-heading">
+                    <h4>{{ lot.nom }}</h4>
+                    <span>{{ formatPercent(lotProgress(lot)) }} · {{ lotStartDate(lot) || '-' }} → {{ lotEndDate(lot) || '-' }}</span>
+                  </div>
+                  <p class="print-lot-description">{{ lot.description || 'Aucune description' }}</p>
+                  @if (lot.taches.length) {
+                    <table class="print-table task-detail-table">
+                      <thead><tr><th>Tâche</th><th>Description</th><th>Début</th><th>Fin</th><th>Avancement</th><th>État</th></tr></thead>
+                      <tbody>
+                        @for (task of lot.taches; track task.id) {
+                          <tr>
+                            <td><strong>{{ task.nom }}</strong></td>
+                            <td>{{ task.description || 'Aucune description' }}</td>
+                            <td>{{ task.dateDebut || '-' }}</td>
+                            <td>{{ task.dateFin || '-' }}</td>
+                            <td>{{ formatPercent(task.avancement) }}</td>
+                            <td>{{ !task.dateFin ? 'Non planifiée' : isLate(task.dateFin, task.avancement) ? 'En retard' : 'Dans les délais' }}</td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  } @else {
+                    <p class="empty">Aucune tâche dans ce lot.</p>
+                  }
+                </article>
+              }
+            </section>
           </section>
         }
       @if (modal === 'mission') {
@@ -221,7 +244,7 @@ interface MissionTimelineEntry {
     .modal-backdrop { position:fixed; inset:0; z-index:10; display:grid; place-items:center; padding:20px; background:rgba(23,34,31,.45); } .modal { width:min(640px,94vw); max-height:calc(100vh - 40px); overflow:auto; padding:24px; background:#fffdf8; box-shadow:0 20px 50px rgba(23,34,31,.25); } .modal-context { color:#68766e; } .fields { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin-top:20px; } label { display:grid; gap:6px; color:#52645d; font-size:12px; font-weight:700; } .wide { grid-column:1 / -1; } input, textarea { width:100%; box-sizing:border-box; border:1px solid #c8d0c8; padding:11px; background:#fff; color:#17221f; font:14px Arial,sans-serif; } textarea { min-height:90px; resize:vertical; } .actions { justify-content:flex-end; margin-top:20px; } .ghost { background:#fff; border:1px solid #bec8be; color:#354740; }
     @keyframes lateBlink { 50% { opacity:.25; } } .late-label, .late-entry .timeline-marker { animation:lateBlink 1s step-end infinite; }
     @keyframes lateBlink { 50% { opacity:.25; } } .late-label, .late-entry .print-timeline-dot { animation:lateBlink 1s step-end infinite; }
-    @media print { .topbar, .hero-actions, .row-actions, .modal-backdrop, .summary-grid, .available-section, .report-section, .message { display:none !important; } .hero { padding:0 0 20px; background:#fff !important; color:#000 !important; } .hero p { color:#333; } .content { padding:0; } .print-summary { display:block; } .print-summary h2 { margin:4px 0; font-size:34px; } .print-stats, .print-timeline-entry { break-inside:avoid; } .late-label, .late-entry .print-timeline-dot { animation:none; } }
+    @media print { .topbar, .hero, .hero-actions, .row-actions, .modal-backdrop, .summary-grid, .available-section, .report-section, .message { display:none !important; } .content { padding:0; } .print-summary { display:block; } .print-summary h2 { margin:4px 0; font-size:34px; } .print-stats, .print-timeline-entry { break-inside:avoid; } .late-label, .late-entry .print-timeline-dot { animation:none; } }
     @media (max-width:900px) { .mission-heading, .lot-heading, .task-row { grid-template-columns:1fr; } .row-actions { justify-content:flex-start; } }
     @media (max-width:640px) { nav { flex-wrap:wrap; justify-content:flex-end; gap:10px; } .hero { display:block; } .hero-actions { margin-top:20px; flex-wrap:wrap; } .summary-grid { grid-template-columns:1fr; } .fields { grid-template-columns:1fr; } .wide { grid-column:auto; } }
   `]
@@ -258,45 +281,16 @@ export class MissionsComponent implements OnInit {
     return lot.taches.length ? this.round(lot.taches.reduce((total, task) => total + this.clamp(task.avancement), 0) / lot.taches.length) : 0;
   }
 
+  lotStartDate(lot: MissionLot): string {
+    return lot.taches.flatMap((task) => [task.dateDebut, task.dateFin]).filter(Boolean).sort()[0] ?? '';
+  }
+
   lotEndDate(lot: MissionLot): string {
     return lot.taches.map((task) => task.dateFin).filter(Boolean).sort().at(-1) ?? '';
   }
 
   missionTaskCount(mission: MissionAppel): number {
     return mission.lots.reduce((total, lot) => total + lot.taches.length, 0);
-  }
-
-  missionTimeline(mission: MissionAppel): MissionTimelineEntry[] {
-    const entries: MissionTimelineEntry[] = [];
-    for (const lot of mission.lots) {
-      const dates = lot.taches.flatMap((task) => [task.dateDebut, task.dateFin]).filter(Boolean).sort();
-      entries.push({
-        id: `lot-${lot.id}`,
-        kind: 'lot',
-        nom: lot.nom,
-        dateDebut: dates[0] ?? '',
-        dateFin: dates.at(-1) ?? '',
-        description: lot.description,
-        avancement: this.lotProgress(lot)
-      });
-      for (const task of lot.taches) {
-        entries.push({
-          id: `task-${task.id}`,
-          kind: 'tache',
-          nom: task.nom,
-          dateDebut: task.dateDebut,
-          dateFin: task.dateFin,
-          description: task.description,
-          avancement: this.clamp(task.avancement),
-          lotNom: lot.nom
-        });
-      }
-    }
-    return entries.sort((first, second) => {
-      const firstDate = first.dateDebut || first.dateFin || '9999-12-31';
-      const secondDate = second.dateDebut || second.dateFin || '9999-12-31';
-      return firstDate.localeCompare(secondDate) || (first.kind === 'lot' ? -1 : 1);
-    });
   }
 
   lateLotCount(mission: MissionAppel): number {
