@@ -53,7 +53,7 @@ import { MissionAppel, MissionLot, MissionTache } from '../../core/models/projec
             <div class="available-grid">
               @for (mission of missions; track mission.id) {
                 <article class="available-card">
-                  <div><small>Mission</small><h3>{{ mission.nom }}</h3><p>{{ mission.description || 'Aucune description' }}</p><span>{{ mission.dateDebut || '-' }} → {{ mission.dateFin || '-' }}</span></div>
+                  <div><small>Mission</small><h3>{{ mission.nom }}</h3><p>{{ mission.description || 'Aucune description' }}</p><span>{{ mission.dateDebut || '-' }} → {{ mission.dateFin || '-' }}</span><p class="duration-label">Durée totale : {{ formatDuration(missionDuration(mission)) }}</p></div>
                   <div class="file-name">{{ missionFileName(mission.nom, mission.id) }}</div>
                   <div class="progress-panel"><strong>{{ formatPercent(missionProgress(mission)) }}</strong><div class="progress-track"><i [style.width.%]="missionProgress(mission)"></i></div></div>
                   <div class="row-actions"><button type="button" (click)="openMission(mission)">Ouvrir</button><button type="button" (click)="printMission(mission)">Imprimer</button><button type="button" (click)="openMissionModal(mission)">Modifier</button><button type="button" class="danger" (click)="deleteMission(mission)">Supprimer</button></div>
@@ -77,6 +77,7 @@ import { MissionAppel, MissionLot, MissionTache } from '../../core/models/projec
                   <h3>{{ mission.nom }}</h3>
                   <p>{{ mission.description || 'Aucune description' }}</p>
                   <span>{{ mission.dateDebut || '-' }} → {{ mission.dateFin || '-' }}</span>
+                  <p class="duration-label">Durée totale : {{ formatDuration(missionDuration(mission)) }}</p>
                 </div>
                 <div class="progress-panel">
                   <strong>{{ formatPercent(missionProgress(mission)) }}</strong>
@@ -96,6 +97,7 @@ import { MissionAppel, MissionLot, MissionTache } from '../../core/models/projec
                   <article class="lot-card">
                     <div class="lot-heading">
                       <div><small>Lot</small><h4>{{ lot.nom }} @if (isLate(lotEndDate(lot), lotProgress(lot))) { <span class="late-label">EN RETARD</span> }</h4><p>{{ lot.description || 'Aucune description' }}</p></div>
+                        <p class="duration-label">Durée totale : {{ formatDuration(lotDuration(lot)) }}</p>
                       <div class="lot-progress"><strong>{{ formatPercent(lotProgress(lot)) }}</strong><div class="progress-track"><i [style.width.%]="lotProgress(lot)"></i></div></div>
                       <div class="row-actions">
                         <button type="button" (click)="openTaskModal(mission, lot)">+ Tâche</button>
@@ -103,17 +105,24 @@ import { MissionAppel, MissionLot, MissionTache } from '../../core/models/projec
                         <button type="button" class="danger" (click)="deleteLot(mission, lot)">Supprimer</button>
                       </div>
                     </div>
-                    <div class="task-list">
-                      @for (task of lot.taches; track task.id) {
-                        <div class="task-row">
-                          <div><strong>{{ task.nom }} @if (isLate(task.dateFin, task.avancement)) { <span class="late-label">EN RETARD</span> }</strong><p>{{ task.description || 'Aucune description' }}</p></div>
-                          <span>{{ task.dateDebut || '-' }} → {{ task.dateFin || '-' }}</span>
-                          <div class="task-progress"><b>{{ formatPercent(task.avancement) }}</b><div class="progress-track"><i [style.width.%]="task.avancement"></i></div></div>
-                          <div class="row-actions"><button type="button" (click)="openTaskModal(mission, lot, task)">Modifier</button><button type="button" class="danger" (click)="deleteTask(mission, lot, task)">Supprimer</button></div>
-                        </div>
-                      } @empty {
-                        <p class="empty">Aucune tâche dans ce lot.</p>
-                      }
+                    <div class="task-table-wrap">
+                      <table class="task-table">
+                        <thead><tr><th>Tâche</th><th>Date de début</th><th>Date de fin</th><th>Durée</th><th>Avancement</th><th>Actions</th></tr></thead>
+                        <tbody>
+                          @for (task of lot.taches; track task.id) {
+                            <tr>
+                              <td><strong>{{ task.nom }} @if (isLate(task.dateFin, task.avancement)) { <span class="late-label">EN RETARD</span> }</strong><small>{{ task.description || 'Aucune description' }}</small></td>
+                              <td>{{ task.dateDebut || '-' }}</td>
+                              <td>{{ task.dateFin || '-' }}</td>
+                              <td><span class="duration-value">{{ formatDuration(taskDuration(task)) }}</span></td>
+                              <td><div class="task-progress"><b>{{ formatPercent(task.avancement) }}</b><div class="progress-track"><i [style.width.%]="task.avancement"></i></div></div></td>
+                              <td><div class="row-actions"><button type="button" (click)="openTaskModal(mission, lot, task)">Modifier</button><button type="button" class="danger" (click)="deleteTask(mission, lot, task)">Supprimer</button></div></td>
+                            </tr>
+                          } @empty {
+                            <tr><td colspan="6" class="empty">Aucune tâche dans ce lot.</td></tr>
+                          }
+                        </tbody>
+                      </table>
                     </div>
                   </article>
                 } @empty {
@@ -136,6 +145,7 @@ import { MissionAppel, MissionLot, MissionTache } from '../../core/models/projec
             <h2>{{ selectedMission.nom }}</h2>
             <p class="print-description">{{ selectedMission.description || 'Aucune description' }}</p>
             <div class="print-progress"><strong>{{ formatPercent(missionProgress(selectedMission)) }}</strong><span>Avancement global</span><div class="progress-track"><i [style.width.%]="missionProgress(selectedMission)"></i></div></div>
+            <p class="print-mission-duration"><strong>Durée totale de la mission :</strong> {{ formatDuration(missionDuration(selectedMission)) }} ({{ selectedMission.dateDebut || '-' }} → {{ selectedMission.dateFin || '-' }})</p>
             <div class="print-stats">
               <div><strong>{{ selectedMission.lots.length }}</strong><span>Lots</span></div>
               <div><strong>{{ missionTaskCount(selectedMission) }}</strong><span>Tâches</span></div>
@@ -146,13 +156,14 @@ import { MissionAppel, MissionLot, MissionTache } from '../../core/models/projec
               <h3>Tableau récapitulatif des lots</h3>
               @if (selectedMission.lots.length) {
                 <table class="print-table lot-summary-table">
-                  <thead><tr><th>Lot</th><th>Description</th><th>Période</th><th>Avancement</th><th>État</th></tr></thead>
+                  <thead><tr><th>Lot</th><th>Description</th><th>Période</th><th>Durée</th><th>Avancement</th><th>État</th></tr></thead>
                   <tbody>
                     @for (lot of selectedMission.lots; track lot.id) {
                       <tr>
                         <td><strong>{{ lot.nom }}</strong></td>
                         <td>{{ lot.description || 'Aucune description' }}</td>
                         <td>{{ lotStartDate(lot) || '-' }} → {{ lotEndDate(lot) || '-' }}</td>
+                        <td>{{ formatDuration(lotDuration(lot)) }}</td>
                         <td>{{ formatPercent(lotProgress(lot)) }}</td>
                         <td>{{ !lotEndDate(lot) ? 'Non planifié' : isLate(lotEndDate(lot), lotProgress(lot)) ? 'En retard' : 'Dans les délais' }}</td>
                       </tr>
@@ -169,12 +180,12 @@ import { MissionAppel, MissionLot, MissionTache } from '../../core/models/projec
                 <article class="print-lot-detail">
                   <div class="print-lot-heading">
                     <h4>{{ lot.nom }}</h4>
-                    <span>{{ formatPercent(lotProgress(lot)) }} · {{ lotStartDate(lot) || '-' }} → {{ lotEndDate(lot) || '-' }}</span>
+                    <span>{{ formatDuration(lotDuration(lot)) }} · {{ formatPercent(lotProgress(lot)) }} · {{ lotStartDate(lot) || '-' }} → {{ lotEndDate(lot) || '-' }}</span>
                   </div>
                   <p class="print-lot-description">{{ lot.description || 'Aucune description' }}</p>
                   @if (lot.taches.length) {
                     <table class="print-table task-detail-table">
-                      <thead><tr><th>Tâche</th><th>Description</th><th>Début</th><th>Fin</th><th>Avancement</th><th>État</th></tr></thead>
+                      <thead><tr><th>Tâche</th><th>Description</th><th>Début</th><th>Fin</th><th>Durée</th><th>Avancement</th><th>État</th></tr></thead>
                       <tbody>
                         @for (task of lot.taches; track task.id) {
                           <tr>
@@ -182,6 +193,7 @@ import { MissionAppel, MissionLot, MissionTache } from '../../core/models/projec
                             <td>{{ task.description || 'Aucune description' }}</td>
                             <td>{{ task.dateDebut || '-' }}</td>
                             <td>{{ task.dateFin || '-' }}</td>
+                            <td>{{ formatDuration(taskDuration(task)) }}</td>
                             <td>{{ formatPercent(task.avancement) }}</td>
                             <td>{{ !task.dateFin ? 'Non planifiée' : isLate(task.dateFin, task.avancement) ? 'En retard' : 'Dans les délais' }}</td>
                           </tr>
@@ -237,15 +249,28 @@ import { MissionAppel, MissionLot, MissionTache } from '../../core/models/projec
     .summary-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:30px; } .summary-grid article { padding:20px; border:1px solid #d9ddd4; background:#fffdf8; } .summary-grid strong { display:block; margin:8px 0 3px; font:700 32px Georgia,serif; } .summary-grid span { color:#68766e; font-size:13px; }
     .section-heading { display:flex; justify-content:space-between; align-items:end; margin-bottom:18px; } .available-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; } .available-card { display:grid; gap:14px; padding:20px; border:1px solid #cfd7ce; background:#fffdf8; } .available-card h3 { margin:6px 0; } .available-card p { margin:4px 0; color:#68766e; line-height:1.5; } .available-card span { color:#68766e; font:12px 'Courier New',monospace; } .file-name { overflow:hidden; color:#52645d; font:11px 'Courier New',monospace; text-overflow:ellipsis; white-space:nowrap; } .mission-card { margin-bottom:18px; border:1px solid #cfd7ce; background:#fffdf8; } .mission-heading { display:grid; grid-template-columns:minmax(220px,1fr) 170px auto; gap:22px; align-items:center; padding:22px; background:#edf3ee; } .mission-heading p, .lot-heading p { margin:5px 0; } .mission-heading span, .task-row > span { color:#68766e; font:12px 'Courier New',monospace; }
     .lots { padding:14px; } .lot-card { margin:10px 0; border:1px solid #d9ddd4; background:#fff; } .lot-heading { display:grid; grid-template-columns:minmax(180px,1fr) 140px auto; gap:16px; align-items:center; padding:16px; border-bottom:1px solid #e5e7df; } .lot-progress { min-width:110px; } .lot-progress strong, .task-progress b { display:block; margin-bottom:4px; font:700 12px 'Courier New',monospace; }
-    .task-row { display:grid; grid-template-columns:minmax(180px,1.3fr) 160px 130px auto; gap:14px; align-items:center; padding:13px 16px; border-bottom:1px solid #edf0eb; } .task-row:last-child { border-bottom:0; } .task-row p { margin:3px 0 0; font-size:13px; } .task-progress { min-width:110px; }
+    .task-table-wrap { overflow-x:auto; padding:0 16px 16px; }
+    .task-table { width:100%; min-width:820px; border-collapse:collapse; text-align:left; }
+    .task-table th { padding:12px 14px; background:#f0f4ef; color:#52645d; font:700 11px 'Courier New',monospace; text-transform:uppercase; white-space:nowrap; }
+    .task-table td { padding:14px; border-bottom:1px solid #edf0eb; color:#354740; font-size:13px; vertical-align:middle; }
+    .task-table tbody tr:hover { background:#fbfcf8; }
+    .task-table td:first-child { min-width:190px; }
+    .task-table td:first-child small { display:block; margin-top:5px; color:#68766e; font-size:12px; }
+    .duration-value { display:inline-block; padding:6px 9px; background:#edf3ee; color:#2f5148; font:700 12px 'Courier New',monospace; white-space:nowrap; }
+    .task-progress { min-width:90px; }
+    .task-table td .row-actions { justify-content:flex-start; flex-wrap:nowrap; gap:8px; }
+    .row-actions { flex-wrap:wrap; justify-content:flex-end; gap:10px; }
+    .row-actions button { min-height:36px; padding:8px 12px; border-radius:4px; transition:background-color .15s ease, transform .15s ease; }
+    .row-actions button:hover { transform:translateY(-1px); background:#c95739; }
+    .row-actions .danger { background:#fff; border:1px solid #efb4a6; color:#a43d28; }
+    .row-actions .danger:hover { background:#fff2ee; }
     .progress-track { height:7px; overflow:hidden; background:#dfe7df; } .progress-track i { display:block; height:100%; background:#de6948; } .empty { padding:18px; color:#68766e; } .empty-page { border:1px dashed #bec8be; text-align:center; }
     .print-summary { display:none; } .print-description { color:#52645d; line-height:1.5; } .print-progress { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; align-items:center; margin:20px 0; } .print-progress strong { color:#de6948; font:700 30px Georgia,serif; } .print-progress span { font:700 11px 'Courier New',monospace; text-transform:uppercase; } .print-progress .progress-track { grid-column:1 / -1; } .print-stats { display:grid; grid-template-columns:repeat(4,1fr); border:1px solid #bec8be; } .print-stats div { padding:15px; text-align:center; border-right:1px solid #bec8be; } .print-stats div:last-child { border-right:0; } .print-stats strong { display:block; font:700 27px Georgia,serif; } .print-stats span { font:11px 'Courier New',monospace; text-transform:uppercase; } .late-stat strong, .late-stat span { color:#c62828; } .print-timeline { position:relative; margin:24px 0 0 12px; padding:12px 0 0 28px; border-left:2px solid #2f5148; } .print-timeline-entry { position:relative; padding:0 0 18px; break-inside:avoid; } .print-timeline-dot { position:absolute; top:5px; left:-36px; width:13px; height:13px; border:3px solid #fff; border-radius:50%; background:#de6948; } .print-timeline-content { border-bottom:1px solid #d9ddd4; padding-bottom:12px; } .print-timeline-meta { display:flex; justify-content:space-between; gap:15px; color:#68766e; font:10px 'Courier New',monospace; } .print-timeline-meta strong { color:#2f5148; } .print-timeline-content h4 { margin:5px 0 2px; font:700 18px Georgia,serif; } .print-timeline-content p, .print-timeline-content small { display:block; margin:3px 0; color:#52645d; } .print-timeline-progress { display:flex; align-items:center; gap:10px; max-width:260px; margin-top:6px; } .print-timeline-progress > span { min-width:35px; font:700 10px 'Courier New',monospace; } .print-timeline-progress .progress-track { flex:1; } .late-entry .print-timeline-dot { background:#c62828; } .late-entry .print-timeline-content { border-color:#e3a4a4; }
-    .row-actions { flex-wrap:wrap; justify-content:flex-end; } .row-actions button { padding:8px 10px; } .row-actions .danger { background:#fff; border:1px solid #efb4a6; color:#a43d28; }
     .modal-backdrop { position:fixed; inset:0; z-index:10; display:grid; place-items:center; padding:20px; background:rgba(23,34,31,.45); } .modal { width:min(640px,94vw); max-height:calc(100vh - 40px); overflow:auto; padding:24px; background:#fffdf8; box-shadow:0 20px 50px rgba(23,34,31,.25); } .modal-context { color:#68766e; } .fields { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin-top:20px; } label { display:grid; gap:6px; color:#52645d; font-size:12px; font-weight:700; } .wide { grid-column:1 / -1; } input, textarea { width:100%; box-sizing:border-box; border:1px solid #c8d0c8; padding:11px; background:#fff; color:#17221f; font:14px Arial,sans-serif; } textarea { min-height:90px; resize:vertical; } .actions { justify-content:flex-end; margin-top:20px; } .ghost { background:#fff; border:1px solid #bec8be; color:#354740; }
     @keyframes lateBlink { 50% { opacity:.25; } } .late-label, .late-entry .timeline-marker { animation:lateBlink 1s step-end infinite; }
     @keyframes lateBlink { 50% { opacity:.25; } } .late-label, .late-entry .print-timeline-dot { animation:lateBlink 1s step-end infinite; }
     @media print { .topbar, .hero, .hero-actions, .row-actions, .modal-backdrop, .summary-grid, .available-section, .report-section, .message { display:none !important; } .content { padding:0; } .print-summary { display:block; } .print-summary h2 { margin:4px 0; font-size:34px; } .print-stats, .print-timeline-entry { break-inside:avoid; } .late-label, .late-entry .print-timeline-dot { animation:none; } }
-    @media (max-width:900px) { .mission-heading, .lot-heading, .task-row { grid-template-columns:1fr; } .row-actions { justify-content:flex-start; } }
+    @media (max-width:900px) { .mission-heading, .lot-heading { grid-template-columns:1fr; } .row-actions { justify-content:flex-start; } }
     @media (max-width:640px) { nav { flex-wrap:wrap; justify-content:flex-end; gap:10px; } .hero { display:block; } .hero-actions { margin-top:20px; flex-wrap:wrap; } .summary-grid { grid-template-columns:1fr; } .fields { grid-template-columns:1fr; } .wide { grid-column:auto; } }
   `]
 })
@@ -287,6 +312,35 @@ export class MissionsComponent implements OnInit {
 
   lotEndDate(lot: MissionLot): string {
     return lot.taches.map((task) => task.dateFin).filter(Boolean).sort().at(-1) ?? '';
+  }
+
+  missionDuration(mission: MissionAppel): number {
+    return this.durationDays(mission.dateDebut, mission.dateFin);
+  }
+
+  lotDuration(lot: MissionLot): number {
+    return this.durationDays(this.lotStartDate(lot), this.lotEndDate(lot));
+  }
+
+  taskDuration(task: MissionTache): number {
+    return this.durationDays(task.dateDebut, task.dateFin);
+  }
+
+  formatDuration(days: number): string {
+    return days ? `${days} jour${days > 1 ? 's' : ''}` : 'Non planifiée';
+  }
+
+  private durationDays(startDate: string, endDate: string): number {
+    if (!startDate || !endDate) return 0;
+    const parseDate = (value: string): number => {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+      return match ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : Number.NaN;
+    };
+    const start = parseDate(startDate);
+    const end = parseDate(endDate);
+    return Number.isFinite(start) && Number.isFinite(end) && end >= start
+      ? Math.floor((end - start) / 86400000) + 1
+      : 0;
   }
 
   missionTaskCount(mission: MissionAppel): number {
