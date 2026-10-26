@@ -374,7 +374,7 @@ Chart.register(...registerables);
               <section class="planning-insights">
                 <div class="insights-head">
                   <div><small>Analyse du planning</small><h2>Avancement des phases</h2></div>
-                  <span class="insights-note">Durée et écart en jours</span>
+                  <span class="insights-note">Bleu : durée prévue/réalisée · Vert : avance ou reste prévu · Rouge : dépassement</span>
                 </div>
                 <div class="planning-stats">
                   <div><span>Phases</span><strong>{{ planningStats.total }}</strong></div>
@@ -382,7 +382,7 @@ Chart.register(...registerables);
                   <div><span>Avancement</span><strong>{{ planningStats.progress }}%</strong></div>
                   <div><span>Écart moyen</span><strong>{{ planningStats.variance }} j</strong></div>
                 </div>
-                <div class="chart-frame"><canvas #planningChart></canvas></div>
+                <div class="chart-frame" [style.height.px]="planningChartHeight"><canvas #planningChart></canvas></div>
                 <div class="chart-frame timeline-frame"><canvas #timelineChart></canvas></div>
                 <div class="chart-frame timeline-frame"><canvas #costChart></canvas></div>
               </section>
@@ -1008,7 +1008,7 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  private parsePlanningDate(value: Row[string]): Date | undefined {
+  private parsePlanningDate(value: Row[string] | undefined): Date | undefined {
     if (typeof value !== 'string' || !value) return undefined;
     const date = new Date(`${value}T00:00:00`);
     return Number.isNaN(date.getTime()) ? undefined : date;
@@ -1381,6 +1381,11 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     };
   }
 
+  get planningChartHeight(): number {
+    const phaseCount = this.selectedFile?.data.planification.length ?? 0;
+    return Math.max(280, phaseCount * 44 + 90);
+  }
+
   ngAfterViewInit(): void {
     this.renderPlanningChart();
   }
@@ -1395,49 +1400,50 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!this.planningCanvas || this.activeSheet !== 'planification') return;
 
     this.planningChart?.destroy();
-    const phases = this.filteredRows as unknown as PhaseProjet[];
+    const phases = this.selectedFile?.data.planification ?? [];
     this.planningChart = new Chart(this.planningCanvas.nativeElement, {
-      type: 'line',
+      type: 'bar',
       data: {
         labels: phases.map((phase) => phase.phase),
         datasets: [
           {
-            label: 'Durée prévue',
-            data: phases.map((phase) => Number(phase.nombreJours || 0)),
-            borderColor: '#2563eb',
-            backgroundColor: '#2563eb22',
-            pointBackgroundColor: '#2563eb',
-            pointRadius: 5,
-            tension: 0.35,
-            fill: true
+            label: 'Durée prévue / réalisée (jours)',
+            data: phases.map((phase) => this.planningBarSegments(phase).base),
+            backgroundColor: '#2563eb',
+            stack: 'phase-duration',
+            borderRadius: 4
           },
           {
-            label: 'Avance / retard',
-            data: phases.map((phase) => Number(phase.avanceRetard || 0)),
-            borderColor: '#e56b4f',
-            backgroundColor: '#e56b4f22',
-            pointBackgroundColor: '#e56b4f',
-            pointRadius: 5,
-            tension: 0.35,
-            fill: true
+            label: 'Avance / reste estimé (jours)',
+            data: phases.map((phase) => this.planningBarSegments(phase).ahead),
+            backgroundColor: '#16a34a',
+            stack: 'phase-duration',
+            borderRadius: 4
           },
           {
-            label: 'Réalisation %',
-            data: phases.map((phase) => Number(phase.pourcentageRealisation || 0)),
-            borderColor: '#16a34a',
-            backgroundColor: '#16a34a22',
-            pointBackgroundColor: '#16a34a',
-            pointRadius: 5,
-            tension: 0.35,
-            fill: false
+            label: 'Dépassement (jours)',
+            data: phases.map((phase) => this.planningBarSegments(phase).late),
+            backgroundColor: '#dc2626',
+            stack: 'phase-duration',
+            borderRadius: 4
           }
         ]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, padding: 18 } } },
-        scales: { y: { beginAtZero: true, grid: { color: '#e5e7eb' } }, x: { grid: { display: false } } }
+        indexAxis: 'y',
+        plugins: {
+          title: { display: true, text: 'Durée prévue et réalisée par phase (toutes les phases)' },
+          legend: { position: 'bottom', labels: { usePointStyle: true, padding: 18 } },
+          tooltip: {
+            callbacks: { afterBody: (items) => this.planningTooltipDetails(phases[items[0]?.dataIndex ?? 0]) }
+          }
+        },
+        scales: {
+          x: { beginAtZero: true, stacked: true, title: { display: true, text: 'Jours' }, grid: { color: '#e5e7eb' } },
+          y: { stacked: true, grid: { display: false } }
+        }
       }
     });
     this.renderTimelineChart();
@@ -1456,10 +1462,10 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
         datasets: [{
           label: 'Réalisation (%)',
           data: phases.map((phase) => this.planningPercentage(phase)),
-          borderColor: '#16a34a',
-          backgroundColor: '#16a34a22',
-          pointBackgroundColor: '#16a34a',
-          pointBorderColor: '#fff',
+          borderColor: '#64748b',
+          backgroundColor: '#64748b22',
+          pointBackgroundColor: phases.map((phase) => this.isPhaseOnSchedule(phase) ? '#16a34a' : '#dc2626'),
+          pointBorderColor: phases.map((phase) => this.isPhaseOnSchedule(phase) ? '#16a34a' : '#dc2626'),
           pointBorderWidth: 2,
           pointRadius: 7,
           tension: 0.25,
@@ -1511,6 +1517,70 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     return 0;
   }
 
+  private planningPlannedDays(phase: PhaseProjet): number {
+    const duration = Number(phase.nombreJours);
+    if (Number.isFinite(duration) && duration > 0) return duration;
+
+    const start = this.parsePlanningDate(phase.dateDebut);
+    const plannedEnd = this.parsePlanningDate(phase.dateFin);
+    return start && plannedEnd && plannedEnd >= start ? this.daysBetween(start, plannedEnd) + 1 : 0;
+  }
+
+  private planningRealizedDays(phase: PhaseProjet): number {
+    const start = this.parsePlanningDate(phase.dateDebut);
+    if (!start) return 0;
+
+    const actualEnd = this.parsePlanningDate(phase.dateFinReelle);
+    const end = actualEnd ?? new Date();
+    end.setHours(0, 0, 0, 0);
+    return end < start ? 0 : this.daysBetween(start, end) + 1;
+  }
+
+  private planningVariance(phase: PhaseProjet): number {
+    const actualEnd = this.parsePlanningDate(phase.dateFinReelle);
+    const plannedEnd = this.parsePlanningDate(phase.dateFin);
+    if (actualEnd && plannedEnd) return this.daysBetween(actualEnd, plannedEnd);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (plannedEnd && today > plannedEnd) return this.daysBetween(today, plannedEnd);
+
+    return Number(phase.avanceRetard ?? 0) || 0;
+  }
+
+  private isPhaseOnSchedule(phase: PhaseProjet): boolean {
+    return this.planningVariance(phase) >= 0;
+  }
+
+  private planningTooltipDetails(phase: PhaseProjet | undefined): string[] {
+    if (!phase) return [];
+    const variance = this.planningVariance(phase);
+    return [
+      `Durée prévue : ${this.planningPlannedDays(phase)} j`,
+      `Durée réalisée / consommée : ${this.planningRealizedDays(phase)} j`,
+      `Écart : ${variance > 0 ? `${variance} j d'avance` : variance < 0 ? `${Math.abs(variance)} j de retard` : 'dans les délais'}`
+    ];
+  }
+
+  private planningBarSegments(phase: PhaseProjet): { base: number; ahead: number; late: number } {
+    const planned = this.planningPlannedDays(phase);
+    const start = this.parsePlanningDate(phase.dateDebut);
+    const actualEnd = this.parsePlanningDate(phase.dateFinReelle);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (!start || (!actualEnd && today < start)) {
+      return { base: planned, ahead: 0, late: 0 };
+    }
+
+    const realized = this.planningRealizedDays(phase);
+    if (realized > planned) {
+      return { base: planned, ahead: 0, late: realized - planned };
+    }
+
+    return { base: realized, ahead: planned - realized, late: 0 };
+  }
+
   private createPlanningChartImage(): string {
     const phases = this.selectedFile?.data.planification ?? [];
     if (!phases.length) return '';
@@ -1519,16 +1589,47 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
     canvas.width = 1200;
     canvas.height = 420;
     const chart = new Chart(canvas, {
-      type: 'line',
+      type: 'bar',
       data: {
         labels: phases.map((phase) => phase.phase),
         datasets: [
-          { label: 'Durée prévue', data: phases.map((phase) => phase.nombreJours), borderColor: '#2563eb', backgroundColor: '#2563eb22', pointRadius: 5, tension: .35, fill: true },
-          { label: 'Avance / retard', data: phases.map((phase) => phase.avanceRetard), borderColor: '#e56b4f', backgroundColor: '#e56b4f22', pointRadius: 5, tension: .35, fill: true },
-          { label: 'Réalisation %', data: phases.map((phase) => this.planningPercentage(phase)), borderColor: '#16a34a', backgroundColor: '#16a34a22', pointRadius: 5, tension: .35, fill: false }
+          {
+            label: 'Durée prévue / réalisée (jours)',
+            data: phases.map((phase) => this.planningBarSegments(phase).base),
+            backgroundColor: '#2563eb',
+            stack: 'phase-duration',
+            borderRadius: 4
+          },
+          {
+            label: 'Avance / reste estimé (jours)',
+            data: phases.map((phase) => this.planningBarSegments(phase).ahead),
+            backgroundColor: '#16a34a',
+            stack: 'phase-duration',
+            borderRadius: 4
+          },
+          {
+            label: 'Dépassement (jours)',
+            data: phases.map((phase) => this.planningBarSegments(phase).late),
+            backgroundColor: '#dc2626',
+            stack: 'phase-duration',
+            borderRadius: 4
+          }
         ]
       },
-      options: { animation: false, responsive: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
+      options: {
+        animation: false,
+        responsive: false,
+        indexAxis: 'y',
+        plugins: {
+          title: { display: true, text: 'Durée prévue et réalisée par phase (toutes les phases)' },
+          legend: { position: 'bottom' },
+          tooltip: { callbacks: { afterBody: (items) => this.planningTooltipDetails(phases[items[0]?.dataIndex ?? 0]) } }
+        },
+        scales: {
+          x: { beginAtZero: true, stacked: true, title: { display: true, text: 'Jours' } },
+          y: { stacked: true }
+        }
+      }
     });
     const image = chart.toBase64Image();
     chart.destroy();
@@ -1549,8 +1650,10 @@ export class ProjectsComponent implements OnInit, AfterViewInit, OnDestroy {
         datasets: [{
           label: 'Réalisation (%)',
           data: phases.map((phase) => phase.pourcentageRealisation),
-          borderColor: '#16a34a',
-          backgroundColor: '#16a34a22',
+          borderColor: '#64748b',
+          backgroundColor: '#64748b22',
+          pointBackgroundColor: phases.map((phase) => this.isPhaseOnSchedule(phase) ? '#16a34a' : '#dc2626'),
+          pointBorderColor: phases.map((phase) => this.isPhaseOnSchedule(phase) ? '#16a34a' : '#dc2626'),
           pointRadius: 7,
           tension: .25,
           fill: true
