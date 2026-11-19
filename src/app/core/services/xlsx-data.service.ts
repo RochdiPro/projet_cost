@@ -23,27 +23,28 @@ import {
 @Injectable({ providedIn: 'root' })
 export class XlsxDataService {
   private readonly tables = new Map<string, object[]>();
+  private readonly apiBaseUrl = `http://${window.location.hostname}:3000`;
 
   constructor(private readonly http: HttpClient) {}
 
   async listAssetFiles(): Promise<string[]> {
-    return firstValueFrom(this.http.get<string[]>('http://localhost:3000/api/projects/files'));
+    return firstValueFrom(this.http.get<string[]>(`${this.apiBaseUrl}/api/projects/files`));
   }
 
   async listEmployeeFiles(): Promise<string[]> {
-    return firstValueFrom(this.http.get<string[]>('http://localhost:3000/api/employees/files'));
+    return firstValueFrom(this.http.get<string[]>(`${this.apiBaseUrl}/api/employees/files`));
   }
 
   async listMissionFiles(): Promise<string[]> {
-    return firstValueFrom(this.http.get<string[]>('http://localhost:3000/api/mission/files'));
+    return firstValueFrom(this.http.get<string[]>(`${this.apiBaseUrl}/api/mission/files`));
   }
 
   async deleteMissionFile(fileName: string): Promise<void> {
-    await firstValueFrom(this.http.delete(`http://localhost:3000/api/mission/file?fileName=${encodeURIComponent(fileName)}`));
+    await firstValueFrom(this.http.delete(`${this.apiBaseUrl}/api/mission/file?fileName=${encodeURIComponent(fileName)}`));
   }
 
   async importMissionWorkbook(fileName: string): Promise<{ missionRows: Record<string, unknown>[]; taskRows: Record<string, unknown>[] }> {
-    const response = await firstValueFrom(this.http.get(`http://localhost:3000/assets/mission/${encodeURIComponent(fileName)}`, { responseType: 'arraybuffer' }));
+    const response = await firstValueFrom(this.http.get(`${this.apiBaseUrl}/assets/mission/${encodeURIComponent(fileName)}`, { responseType: 'arraybuffer' }));
     return this.readMissionWorkbook(XLSX.read(response, { type: 'array' }));
   }
 
@@ -66,18 +67,18 @@ export class XlsxDataService {
     const content = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
 
     await firstValueFrom(
-      this.http.post(`http://localhost:3000/api/mission/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
+      this.http.post(`${this.apiBaseUrl}/api/mission/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
         headers: { 'Content-Type': 'application/octet-stream' }
       })
     );
   }
 
   async deleteEmployeeFile(fileName: string): Promise<void> {
-    await firstValueFrom(this.http.delete(`http://localhost:3000/api/employees/file?fileName=${encodeURIComponent(fileName)}`));
+    await firstValueFrom(this.http.delete(`${this.apiBaseUrl}/api/employees/file?fileName=${encodeURIComponent(fileName)}`));
   }
 
   async deleteAssetFile(fileName: string): Promise<void> {
-    await firstValueFrom(this.http.delete(`http://localhost:3000/api/projects/file?fileName=${encodeURIComponent(fileName)}`));
+    await firstValueFrom(this.http.delete(`${this.apiBaseUrl}/api/projects/file?fileName=${encodeURIComponent(fileName)}`));
   }
 
   async importAsset<T>(assetPath: string, sheetName?: string): Promise<T[]> {
@@ -160,7 +161,7 @@ export class XlsxDataService {
 
     const content = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
     await firstValueFrom(
-      this.http.post(`http://localhost:3000/api/projects/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
+      this.http.post(`${this.apiBaseUrl}/api/projects/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
         headers: { 'Content-Type': 'application/octet-stream' }
       })
     );
@@ -172,7 +173,7 @@ export class XlsxDataService {
     const content = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
 
     await firstValueFrom(
-      this.http.post(`http://localhost:3000/api/assets/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
+      this.http.post(`${this.apiBaseUrl}/api/assets/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
         headers: { 'Content-Type': 'application/octet-stream' }
       })
     );
@@ -184,7 +185,7 @@ export class XlsxDataService {
     const content = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
 
     await firstValueFrom(
-      this.http.post(`http://localhost:3000/api/employees/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
+      this.http.post(`${this.apiBaseUrl}/api/employees/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
         headers: { 'Content-Type': 'application/octet-stream' }
       })
     );
@@ -207,7 +208,7 @@ export class XlsxDataService {
     const content = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
 
     await firstValueFrom(
-      this.http.post(`http://localhost:3000/api/assets/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
+      this.http.post(`${this.apiBaseUrl}/api/assets/workbook?fileName=${encodeURIComponent(fileName)}`, content, {
         headers: { 'Content-Type': 'application/octet-stream' }
       })
     );

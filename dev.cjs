@@ -3,7 +3,7 @@ const { spawn } = require('node:child_process');
 const npmCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const api = spawn(process.execPath, ['server.cjs'], { stdio: 'inherit' });
 const angularPort = process.env.ANGULAR_PORT || '4201';
-const angular = spawn(npmCommand, ['ng', 'serve', '--port', angularPort], { stdio: 'inherit', shell: process.platform === 'win32' });
+const angular = spawn(npmCommand, ['ng', 'serve', '--host', '0.0.0.0', '--port', angularPort], { stdio: 'inherit', shell: process.platform === 'win32' });
 
 const stopProcessTree = (child) => {
   if (child.killed || !child.pid) return;

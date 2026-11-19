@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 
 const port = Number(process.env.PORT || 3000);
+const host = process.env.API_HOST || '0.0.0.0';
 const assetsDirectory = path.join(__dirname, 'src', 'assets');
 const projectsDirectory = path.join(assetsDirectory, 'projets');
 const employeesDirectory = path.join(assetsDirectory, 'employees');
@@ -168,13 +169,13 @@ const server = http.createServer(async (request, response) => {
 
 server.on('error', (error) => {
   if (error.code === 'EADDRINUSE') {
-    console.log(`Project Cost API déjà active sur http://localhost:${port}`);
+    console.log(`Project Cost API déjà active sur ${host}:${port}`);
     return;
   }
   console.error('Erreur API:', error);
   process.exitCode = 1;
 });
 
-server.listen(port, () => {
-  console.log(`Project Cost API disponible sur http://localhost:${port}`);
+server.listen(port, host, () => {
+  console.log(`Project Cost API en écoute sur ${host}:${port}`);
 });

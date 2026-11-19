@@ -19,9 +19,9 @@ Les indicateurs de délais, les montants restants des factures, les coûts des c
 
 ## Development server
 
-Run `npm start` to launch Angular and the local API together. Navigate to `http://localhost:4201/`. The application will automatically reload if you change any of the source files.
+Run `npm start` to launch Angular and the API together. Both servers listen on all network interfaces (`0.0.0.0`). On the host machine, navigate to `http://localhost:4201/`; from another device on the same network, use `http://<IP-de-la-machine>:4201/`. The application will automatically reload if you change any of the source files.
 
-The API saves generated workbooks in `src/assets` through `http://localhost:3000`. Set `ANGULAR_PORT=4200` if that port is available.
+The API saves generated workbooks in `src/assets` on port `3000`; the frontend connects to it using the same host name or IP used to open the application. Ensure the host firewall allows the required ports when accessing the app from another device. Set `ANGULAR_PORT=4200` if that port is available.
 
 ## Code scaffolding
 
